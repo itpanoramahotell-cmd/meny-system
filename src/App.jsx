@@ -81,6 +81,7 @@ function Display() {
   const [isMenuLoaded, setIsMenuLoaded] = useState(false);
   const today = getTodayStr();
 
+  // Settings state
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
     return saved ? JSON.parse(saved) : { 
@@ -91,6 +92,11 @@ function Display() {
       opacityLevel: 2 
     };
   });
+
+  // State for bakgrunnsbytte (fading)
+  const [bgImage, setBgImage] = useState(settings.backgroundImage);
+  const [prevBgImage, setPrevBgImage] = useState(settings.backgroundImage);
+  const [isFading, setIsFading] = useState(false);
 
   useEffect(() => {
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
@@ -103,31 +109,58 @@ function Display() {
         const data = doc.data();
         setSettings(data);
         localStorage.setItem('menuSettings', JSON.stringify(data));
+        
+        // Sjekk om bakgrunnsbilde er endret
+        if (data.backgroundImage && data.backgroundImage !== bgImage) {
+            setPrevBgImage(bgImage); // Lagre det gamle bildet
+            setBgImage(data.backgroundImage); // Sett det nye bildet
+            setIsFading(true); // Start fade
+            
+            // Etter 1 sekund (når faden er ferdig), fjern det gamle bildet fra DOM
+            setTimeout(() => {
+                setIsFading(false);
+                setPrevBgImage(data.backgroundImage); 
+            }, 1000);
+        }
       }
     });
     return () => { unsubMenu(); unsubSettings(); };
-  }, []);
+  }, [bgImage]); // Avhengighet oppdatert
 
   const dayData = menu[today] || {};
   const isDark = settings.theme === 'dark';
-  const currentBg = settings.backgroundImage; 
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
 
   return (
-    <div 
-      className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-cover bg-center bg-no-repeat ${!currentBg ? 'admin-background' : ''}`}
-      style={currentBg ? { backgroundImage: `url('/${currentBg}')`, zIndex: 50 } : { zIndex: 50 }}
-    >
-      {currentBg && (
-        <div className={`absolute inset-0 z-0 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
+    <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden ${!bgImage ? 'admin-background' : 'bg-black'}`}>
+      
+      {/* Lag 1: Det gamle bildet (vises under faden) */}
+      {prevBgImage && (
+         <div 
+           className="absolute inset-0 bg-cover bg-center z-0"
+           style={{ backgroundImage: `url('/${prevBgImage}')` }}
+         ></div>
       )}
 
-      {/* GLASSBOKSEN */}
+      {/* Lag 2: Det nye bildet (fader inn over det gamle) */}
+      {bgImage && (
+         <div 
+           className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-1000 ease-in-out ${isFading ? 'opacity-0' : 'opacity-100'}`}
+           style={{ backgroundImage: `url('/${bgImage}')` }}
+         ></div>
+      )}
+
+      {/* Mørkt overlay (ligger oppå bildene, men under teksten) */}
+      {(bgImage || prevBgImage) && (
+        <div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
+      )}
+
+      {/* GLASSBOKSEN (Ligger øverst, Z-30) */}
       <div 
         className={`
-          relative z-10 w-[90vw] aspect-video max-h-[85vh]
+          relative z-30 w-[90vw] aspect-video max-h-[85vh]
           rounded-[3rem] text-center animate-fade-in transition-all duration-500
           backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-10 px-6
           ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}
@@ -140,34 +173,12 @@ function Display() {
              </span>
         </div>
 
-        {/* MIDTEN */}
         <div className="flex-1 flex flex-col justify-center gap-4 md:gap-8 my-2 overflow-hidden w-full">
           {isMenuLoaded && (
             <>
-              <MenuSection 
-                title="Forrett" 
-                dish={dayData.starter} 
-                allergens={dayData.starterAllergens} 
-                fallback={settings.starter} 
-                fallbackAllergens={settings.starterAllergens}
-                delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
-              />
-              <MenuSection 
-                title="Hovedrett" 
-                dish={dayData.main} 
-                allergens={dayData.mainAllergens}
-                fallback={settings.main} 
-                fallbackAllergens={settings.mainAllergens}
-                delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
-              />
-              <MenuSection 
-                title="Dessert" 
-                dish={dayData.dessert} 
-                allergens={dayData.dessertAllergens}
-                fallback={settings.dessert} 
-                fallbackAllergens={settings.dessertAllergens}
-                delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
-              />
+              <MenuSection title="Forrett" dish={dayData.starter} allergens={dayData.starterAllergens} fallback={settings.starter} fallbackAllergens={settings.starterAllergens} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Hovedrett" dish={dayData.main} allergens={dayData.mainAllergens} fallback={settings.main} fallbackAllergens={settings.mainAllergens} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Dessert" dish={dayData.dessert} allergens={dayData.dessertAllergens} fallback={settings.dessert} fallbackAllergens={settings.dessertAllergens} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
             </>
           )}
         </div>
@@ -196,7 +207,6 @@ const MenuSection = ({ title, dish, allergens, fallback, fallbackAllergens, dela
         <p className={`${dynamicSizeClass} ${font} leading-tight py-1 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>
           {text}
         </p>
-        {/* Allergen felt - vises kun hvis det er tekst */}
         {allergensText && (
           <p className={`text-xl md:text-3xl font-serif italic mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
             {allergensText}
@@ -228,10 +238,9 @@ const PreviewScreen = ({ data, settings }) => {
             <div className="flex-1 flex flex-col justify-center gap-1 w-full">
               {['Forrett', 'Hovedrett', 'Dessert'].map((t) => {
                 const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
-                const allergenKey = t === 'Forrett' ? 'starterAllergens' : t === 'Hovedrett' ? 'mainAllergens' : 'dessertAllergens';
+                const allergenKey = `${key}Allergens`;
                 const text = data[key] || settings[key] || '...';
                 const allergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
-
                 return (
                   <div key={key}>
                     <p className={`text-[0.35rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
