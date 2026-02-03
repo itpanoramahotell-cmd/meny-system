@@ -25,13 +25,12 @@ const FONTS = [
   { id: 'font-pinyon', name: 'Pinyon Script' },
 ];
 
-// OPPDATERT: Enda større fonter!
 const SIZES = [
   { id: 'lvl1', label: '1 - Stor', class: 'text-5xl md:text-6xl' },
   { id: 'lvl2', label: '2 - Større', class: 'text-6xl md:text-7xl' },
   { id: 'lvl3', label: '3 - Enorm', class: 'text-7xl md:text-8xl' }, 
   { id: 'lvl4', label: '4 - Gigantisk', class: 'text-8xl md:text-9xl' },
-  { id: 'lvl5', label: '5 - Maksimal', class: 'text-9xl md:text-[11rem]' }, // Custom value for ekstrem størrelse
+  { id: 'lvl5', label: '5 - Maksimal', class: 'text-9xl md:text-[11rem]' },
 ];
 
 const OPACITY_LEVELS = [
@@ -59,12 +58,9 @@ const getNext14Days = () => {
   return dates;
 };
 
-// OPPDATERT: Beregner fontstørrelse dynamisk for de nye gigantiske nivåene
 const calculateFontSize = (text, baseSizeId) => {
   if (!text) return 'text-6xl';
   const len = text.length;
-
-  // Mapping av 5 nivåer (Fallback strategi hvis teksten blir lang)
   let sizes = {
     lvl1: { short: 'text-6xl', medium: 'text-5xl', long: 'text-4xl', xtra: 'text-3xl' },
     lvl2: { short: 'text-7xl', medium: 'text-6xl', long: 'text-5xl', xtra: 'text-3xl' },
@@ -72,36 +68,51 @@ const calculateFontSize = (text, baseSizeId) => {
     lvl4: { short: 'text-9xl', medium: 'text-8xl', long: 'text-6xl', xtra: 'text-4xl' },
     lvl5: { short: 'text-[11rem]', medium: 'text-9xl', long: 'text-7xl', xtra: 'text-5xl' }
   };
-
   const selectedSet = sizes[baseSizeId] || sizes['lvl3'];
-
-  if (len < 12) return selectedSet.short; // Kort ord (f.eks "Hummersuppe")
-  if (len < 25) return selectedSet.medium; // Vanlig setning
-  if (len < 45) return selectedSet.long; // Lang beskrivelse
-  return selectedSet.xtra; // Veldig lang tekst (Safety)
+  if (len < 12) return selectedSet.short;
+  if (len < 25) return selectedSet.medium;
+  if (len < 45) return selectedSet.long;
+  return selectedSet.xtra;
 };
 
 // --- DISPLAY (TV-SKJERMEN) ---
 function Display() {
   const [menu, setMenu] = useState({});
-  const [settings, setSettings] = useState({ 
-    theme: 'light', 
-    backgroundImage: BACKGROUND_IMAGES[0],
-    fontFamily: 'font-great-vibes',
-    fontSize: 'lvl3',
-    opacityLevel: 2 
-  });
   const today = getTodayStr();
+
+  // FIX: Vi prøver å hente innstillinger fra localStorage først!
+  // Dette gjør at bildet laster umiddelbart hvis du har vært på siden før.
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('menuSettings');
+    return saved ? JSON.parse(saved) : { 
+      theme: 'light', 
+      backgroundImage: null, // Start som null, så vi ikke viser feil bilde
+      fontFamily: 'font-great-vibes',
+      fontSize: 'lvl3',
+      opacityLevel: 2 
+    };
+  });
 
   useEffect(() => {
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => d.exists() && setMenu(d.data()));
-    const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (d) => d.exists() && setSettings(d.data()));
+    
+    // Når vi får nye settings fra Firebase, lagrer vi dem også i localStorage
+    const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setSettings(data);
+        localStorage.setItem('menuSettings', JSON.stringify(data));
+      }
+    });
     return () => { unsubMenu(); unsubSettings(); };
   }, []);
 
   const dayData = menu[today] || {};
   const isDark = settings.theme === 'dark';
-  const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0];
+  
+  // FIX: Hvis backgroundImage er null (første gang), bruk admin-bakgrunn.
+  // Hvis vi har et bilde (enten fra cache eller firebase), bruk det.
+  const currentBg = settings.backgroundImage; 
   const currentFont = settings.fontFamily || 'font-great-vibes';
   
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
@@ -109,12 +120,15 @@ function Display() {
 
   return (
     <div 
-      className="fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: `url('/${currentBg}')`, zIndex: 50 }}
+      className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-cover bg-center bg-no-repeat ${!currentBg ? 'admin-background' : ''}`}
+      style={currentBg ? { backgroundImage: `url('/${currentBg}')`, zIndex: 50 } : { zIndex: 50 }}
     >
-      <div className={`absolute inset-0 z-0 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
+      {/* Overlay - Kun hvis vi har bilde */}
+      {currentBg && (
+        <div className={`absolute inset-0 z-0 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
+      )}
 
-      {/* GLASSBOKSEN - Justert ned til 90% bredde for mer luft */}
+      {/* GLASSBOKSEN */}
       <div 
         className={`
           relative z-10 w-[90vw] aspect-video max-h-[85vh]
@@ -124,21 +138,18 @@ function Display() {
         `}
         style={{ backgroundColor: bgStyle }}
       >
-        {/* TOPP */}
         <div className="flex-none pt-2">
              <span className={`text-2xl md:text-3xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
                Dagens Meny
              </span>
         </div>
 
-        {/* MIDTEN */}
         <div className="flex-1 flex flex-col justify-center gap-4 md:gap-8 my-2 overflow-hidden w-full">
           <MenuSection title="Forrett" dish={dayData.starter} fallback={settings.starter} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
           <MenuSection title="Hovedrett" dish={dayData.main} fallback={settings.main} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
           <MenuSection title="Dessert" dish={dayData.dessert} fallback={settings.dessert} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
         </div>
 
-        {/* BUNN */}
         <div className="flex-none pb-2">
             <p className={`text-4xl md:text-5xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
               Velbekomme
@@ -170,7 +181,7 @@ const MenuSection = ({ title, dish, fallback, delay, isDark, font, baseSize }) =
 // --- PREVIEW ---
 const PreviewScreen = ({ data, settings }) => {
   const isDark = settings.theme === 'dark';
-  const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0];
+  const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0]; // I preview bruker vi default hvis ingen valgt
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
@@ -180,7 +191,6 @@ const PreviewScreen = ({ data, settings }) => {
       <div className="absolute inset-0 bg-cover bg-center transition-all duration-500" style={{ backgroundImage: `url('/${currentBg}')` }}></div>
       <div className={`absolute inset-0 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       <div className="absolute inset-0 flex items-center justify-center p-2">
-         {/* Preview Box - Scaled Down */}
          <div 
             className={`w-[90%] aspect-video rounded-lg flex flex-col items-center justify-between p-2 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`}
             style={{ backgroundColor: bgStyle }}
