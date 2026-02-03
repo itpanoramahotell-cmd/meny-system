@@ -78,7 +78,7 @@ const calculateFontSize = (text, baseSizeId) => {
 // --- DISPLAY (TV-SKJERMEN) ---
 function Display() {
   const [menu, setMenu] = useState({});
-  const [isMenuLoaded, setIsMenuLoaded] = useState(false); // NY: Holder igjen visningen
+  const [isMenuLoaded, setIsMenuLoaded] = useState(false);
   const today = getTodayStr();
 
   const [settings, setSettings] = useState(() => {
@@ -93,13 +93,11 @@ function Display() {
   });
 
   useEffect(() => {
-    // Hent meny
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
       if (d.exists()) setMenu(d.data());
-      setIsMenuLoaded(true); // Først NÅ slipper vi teksten løs!
+      setIsMenuLoaded(true);
     });
     
-    // Hent innstillinger
     const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -142,13 +140,34 @@ function Display() {
              </span>
         </div>
 
-        {/* MIDTEN: Viser kun innhold når isMenuLoaded er true */}
+        {/* MIDTEN */}
         <div className="flex-1 flex flex-col justify-center gap-4 md:gap-8 my-2 overflow-hidden w-full">
           {isMenuLoaded && (
             <>
-              <MenuSection title="Forrett" dish={dayData.starter} fallback={settings.starter} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Hovedrett" dish={dayData.main} fallback={settings.main} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Dessert" dish={dayData.dessert} fallback={settings.dessert} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection 
+                title="Forrett" 
+                dish={dayData.starter} 
+                allergens={dayData.starterAllergens} 
+                fallback={settings.starter} 
+                fallbackAllergens={settings.starterAllergens}
+                delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
+              />
+              <MenuSection 
+                title="Hovedrett" 
+                dish={dayData.main} 
+                allergens={dayData.mainAllergens}
+                fallback={settings.main} 
+                fallbackAllergens={settings.mainAllergens}
+                delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
+              />
+              <MenuSection 
+                title="Dessert" 
+                dish={dayData.dessert} 
+                allergens={dayData.dessertAllergens}
+                fallback={settings.dessert} 
+                fallbackAllergens={settings.dessertAllergens}
+                delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} 
+              />
             </>
           )}
         </div>
@@ -163,8 +182,9 @@ function Display() {
   );
 }
 
-const MenuSection = ({ title, dish, fallback, delay, isDark, font, baseSize }) => {
+const MenuSection = ({ title, dish, allergens, fallback, fallbackAllergens, delay, isDark, font, baseSize }) => {
   const text = dish || fallback || '...';
+  const allergensText = dish ? allergens : (allergens || fallbackAllergens);
   const dynamicSizeClass = calculateFontSize(text, baseSize);
 
   return (
@@ -176,6 +196,12 @@ const MenuSection = ({ title, dish, fallback, delay, isDark, font, baseSize }) =
         <p className={`${dynamicSizeClass} ${font} leading-tight py-1 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>
           {text}
         </p>
+        {/* Allergen felt - vises kun hvis det er tekst */}
+        {allergensText && (
+          <p className={`text-xl md:text-3xl font-serif italic mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+            {allergensText}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -202,12 +228,17 @@ const PreviewScreen = ({ data, settings }) => {
             <div className="flex-1 flex flex-col justify-center gap-1 w-full">
               {['Forrett', 'Hovedrett', 'Dessert'].map((t) => {
                 const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
+                const allergenKey = t === 'Forrett' ? 'starterAllergens' : t === 'Hovedrett' ? 'mainAllergens' : 'dessertAllergens';
+                const text = data[key] || settings[key] || '...';
+                const allergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
+
                 return (
                   <div key={key}>
                     <p className={`text-[0.35rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
                     <p className={`text-lg ${currentFont} leading-tight truncate px-1`}>
-                      {data[key] || settings[key] || '...'}
+                      {text}
                     </p>
+                    {allergens && <p className={`text-[0.3rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{allergens}</p>}
                   </div>
                 )
               })}
@@ -249,7 +280,9 @@ function Admin() {
   const [selectedDate, setSelectedDate] = useState(dates[0]);
   const [fullMenu, setFullMenu] = useState({});
   const [settings, setSettings] = useState({ 
-    starter: '', main: '', dessert: '', 
+    starter: '', starterAllergens: '',
+    main: '', mainAllergens: '',
+    dessert: '', dessertAllergens: '',
     theme: 'light', backgroundImage: BACKGROUND_IMAGES[0],
     fontFamily: 'font-great-vibes', fontSize: 'lvl3',
     opacityLevel: 2
@@ -264,15 +297,18 @@ function Admin() {
   }, []);
 
   const saveData = async (path, data) => { try { await setDoc(doc(db, "restaurants", path), data, { merge: true }); } catch (e) { console.error(e); } };
+  
   const handleMenuChange = (field, val) => {
     const updatedDay = { ...(fullMenu[selectedDate.id] || {}), [field]: val };
     const updatedFullMenu = { ...fullMenu, [selectedDate.id]: updatedDay };
     setFullMenu(updatedFullMenu); saveData("dailyMenu", { [selectedDate.id]: updatedDay });
   };
+  
   const handleSettingsChange = (field, val) => {
     const newSettings = { ...settings, [field]: val };
     setSettings(newSettings); saveData("settings", newSettings);
   };
+  
   const currentDayData = fullMenu[selectedDate.id] || {};
 
   return (
@@ -332,9 +368,15 @@ function Admin() {
               </div>
               <div className="border-t border-stone-200"></div>
               <div>
-                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Standardtekster (Fallback)</h2>
+                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Standardtekster & Allergener (Fallback)</h2>
                 <div className="space-y-4">
-                  {['starter', 'main', 'dessert'].map((key) => (<div key={key}><label className="text-xs uppercase font-bold text-stone-500 block mb-2">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label><input value={settings[key] || ''} onChange={(e) => handleSettingsChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="Fyll inn standard..." /></div>))}
+                  {['starter', 'main', 'dessert'].map((key) => (
+                    <div key={key} className="space-y-2">
+                        <label className="text-xs uppercase font-bold text-stone-500 block">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
+                        <input value={settings[key] || ''} onChange={(e) => handleSettingsChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="Retten..." />
+                        <input value={settings[`${key}Allergens`] || ''} onChange={(e) => handleSettingsChange(`${key}Allergens`, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Allergener (f.eks. Gluten, Melk)" />
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -345,7 +387,19 @@ function Admin() {
               </div>
               <h2 className="text-xl font-serif text-stone-800 mb-6 capitalize">{selectedDate.fullDisplay}</h2>
               <div className="space-y-6">
-                {['starter', 'main', 'dessert'].map((key) => (<div key={key}><div className="flex justify-between mb-2"><label className="text-xs uppercase font-bold text-stone-500">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>{!currentDayData[key] && settings[key] && <span className="text-[10px] text-stone-400 italic bg-stone-100 px-2 rounded border border-stone-200">Bruker standard</span>}</div><input value={currentDayData[key] || ''} onChange={(e) => handleMenuChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-lg font-serif text-stone-900" placeholder={settings[key] ? `(Standard: ${settings[key]})` : "Skriv retten her..."} /></div>))}
+                {['starter', 'main', 'dessert'].map((key) => {
+                  const allergenKey = `${key}Allergens`;
+                  return (
+                    <div key={key} className="space-y-2">
+                        <div className="flex justify-between">
+                            <label className="text-xs uppercase font-bold text-stone-500">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
+                            {!currentDayData[key] && settings[key] && <span className="text-[10px] text-stone-400 italic bg-stone-100 px-2 rounded border border-stone-200">Bruker standard</span>}
+                        </div>
+                        <input value={currentDayData[key] || ''} onChange={(e) => handleMenuChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-lg font-serif text-stone-900" placeholder={settings[key] ? `(Standard: ${settings[key]})` : "Skriv retten her..."} />
+                        <input value={currentDayData[allergenKey] || ''} onChange={(e) => handleMenuChange(allergenKey, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder={settings[allergenKey] ? `(Std. Allergener: ${settings[allergenKey]})` : "Allergener..."} />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
