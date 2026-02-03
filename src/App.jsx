@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { db, auth } from './firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -81,51 +81,75 @@ function Display() {
   const [isMenuLoaded, setIsMenuLoaded] = useState(false);
   const today = getTodayStr();
 
-  // Settings state
+  // Settings state (Theme, Font, Text, etc - IKKE bakgrunnsbilde, det håndterer vi separat)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
     return saved ? JSON.parse(saved) : { 
       theme: 'light', 
-      backgroundImage: null, 
       fontFamily: 'font-great-vibes',
       fontSize: 'lvl3',
       opacityLevel: 2 
     };
   });
 
-  // State for bakgrunnsbytte (fading)
-  const [bgImage, setBgImage] = useState(settings.backgroundImage);
-  const [prevBgImage, setPrevBgImage] = useState(settings.backgroundImage);
-  const [isFading, setIsFading] = useState(false);
+  // --- BAKGRUNNSBILDE LOGIKK (STABIL FADE) ---
+  const [currentBg, setCurrentBg] = useState(() => {
+      // Hent lagret bilde fra start for å unngå blink
+      const saved = localStorage.getItem('menuSettings');
+      return saved ? JSON.parse(saved).backgroundImage : null;
+  });
+  const [incomingBg, setIncomingBg] = useState(null); // Bildet som skal fade inn
+  const [shouldFadeIn, setShouldFadeIn] = useState(false); // Trigger animasjonen
 
   useEffect(() => {
+    // 1. Hent menydata
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
       if (d.exists()) setMenu(d.data());
       setIsMenuLoaded(true);
     });
     
+    // 2. Hent innstillinger
     const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
         setSettings(data);
         localStorage.setItem('menuSettings', JSON.stringify(data));
         
-        // Sjekk om bakgrunnsbilde er endret
-        if (data.backgroundImage && data.backgroundImage !== bgImage) {
-            setPrevBgImage(bgImage); // Lagre det gamle bildet
-            setBgImage(data.backgroundImage); // Sett det nye bildet
-            setIsFading(true); // Start fade
-            
-            // Etter 1 sekund (når faden er ferdig), fjern det gamle bildet fra DOM
-            setTimeout(() => {
-                setIsFading(false);
-                setPrevBgImage(data.backgroundImage); 
-            }, 1000);
+        // Håndter bakgrunnsbilde separat for fading
+        const newBg = data.backgroundImage;
+        
+        // Hvis vi har et nytt bilde, og det er ulikt det vi ser på, OG vi ikke allerede holder på å bytte til det
+        if (newBg && newBg !== currentBg && newBg !== incomingBg) {
+             // Steg 1: Gjør klar det nye bildet (usynlig på toppen)
+             setIncomingBg(newBg);
         }
       }
     });
     return () => { unsubMenu(); unsubSettings(); };
-  }, [bgImage]); // Avhengighet oppdatert
+  }, [currentBg, incomingBg]);
+
+  // Effekt som kjører når vi har et incomingBg klart
+  useEffect(() => {
+    if (incomingBg) {
+        // Vent en bitteliten stund så DOM-en rekker å tegne det nye bildet med opacity-0
+        const frameId = requestAnimationFrame(() => {
+            setShouldFadeIn(true); // Start CSS transition til opacity-100
+        });
+
+        // Vent til animasjonen er ferdig (2 sekunder / 2000ms)
+        const timer = setTimeout(() => {
+            setCurrentBg(incomingBg); // Gjør det nye bildet til hovedbilde
+            setIncomingBg(null);      // Fjern det midlertidige laget
+            setShouldFadeIn(false);   // Nullstill fade
+        }, 2000); 
+
+        return () => {
+            cancelAnimationFrame(frameId);
+            clearTimeout(timer);
+        }
+    }
+  }, [incomingBg]);
+
 
   const dayData = menu[today] || {};
   const isDark = settings.theme === 'dark';
@@ -134,30 +158,28 @@ function Display() {
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
 
   return (
-    <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden ${!bgImage ? 'admin-background' : 'bg-black'}`}>
+    <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black`}>
       
-      {/* Lag 1: Det gamle bildet (vises under faden) */}
-      {prevBgImage && (
+      {/* 1. BASE LAYER: Det gjeldende bildet (Alltid synlig underst) */}
+      <div 
+        className={`absolute inset-0 bg-cover bg-center z-0 transition-none ${!currentBg ? 'admin-background' : ''}`}
+        style={currentBg ? { backgroundImage: `url('/${currentBg}')` } : {}}
+      ></div>
+
+      {/* 2. FADE LAYER: Det nye bildet som kommer inn (Ligger over base layer) */}
+      {incomingBg && (
          <div 
-           className="absolute inset-0 bg-cover bg-center z-0"
-           style={{ backgroundImage: `url('/${prevBgImage}')` }}
+           className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`}
+           style={{ backgroundImage: `url('/${incomingBg}')` }}
          ></div>
       )}
 
-      {/* Lag 2: Det nye bildet (fader inn over det gamle) */}
-      {bgImage && (
-         <div 
-           className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-1000 ease-in-out ${isFading ? 'opacity-0' : 'opacity-100'}`}
-           style={{ backgroundImage: `url('/${bgImage}')` }}
-         ></div>
-      )}
-
-      {/* Mørkt overlay (ligger oppå bildene, men under teksten) */}
-      {(bgImage || prevBgImage) && (
+      {/* 3. OVERLAY: Mørk hinne (Ligger over begge bildene for å sikre lesbarhet) */}
+      {(currentBg || incomingBg) && (
         <div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       )}
 
-      {/* GLASSBOKSEN (Ligger øverst, Z-30) */}
+      {/* 4. CONTENT: Selve glassboksen (Ligger øverst) */}
       <div 
         className={`
           relative z-30 w-[90vw] aspect-video max-h-[85vh]
