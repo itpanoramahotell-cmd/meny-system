@@ -78,15 +78,14 @@ const calculateFontSize = (text, baseSizeId) => {
 // --- DISPLAY (TV-SKJERMEN) ---
 function Display() {
   const [menu, setMenu] = useState({});
+  const [isMenuLoaded, setIsMenuLoaded] = useState(false); // NY: Holder igjen visningen
   const today = getTodayStr();
 
-  // FIX: Vi prøver å hente innstillinger fra localStorage først!
-  // Dette gjør at bildet laster umiddelbart hvis du har vært på siden før.
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
     return saved ? JSON.parse(saved) : { 
       theme: 'light', 
-      backgroundImage: null, // Start som null, så vi ikke viser feil bilde
+      backgroundImage: null, 
       fontFamily: 'font-great-vibes',
       fontSize: 'lvl3',
       opacityLevel: 2 
@@ -94,9 +93,13 @@ function Display() {
   });
 
   useEffect(() => {
-    const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => d.exists() && setMenu(d.data()));
+    // Hent meny
+    const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
+      if (d.exists()) setMenu(d.data());
+      setIsMenuLoaded(true); // Først NÅ slipper vi teksten løs!
+    });
     
-    // Når vi får nye settings fra Firebase, lagrer vi dem også i localStorage
+    // Hent innstillinger
     const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -109,12 +112,8 @@ function Display() {
 
   const dayData = menu[today] || {};
   const isDark = settings.theme === 'dark';
-  
-  // FIX: Hvis backgroundImage er null (første gang), bruk admin-bakgrunn.
-  // Hvis vi har et bilde (enten fra cache eller firebase), bruk det.
   const currentBg = settings.backgroundImage; 
   const currentFont = settings.fontFamily || 'font-great-vibes';
-  
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
 
@@ -123,7 +122,6 @@ function Display() {
       className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-cover bg-center bg-no-repeat ${!currentBg ? 'admin-background' : ''}`}
       style={currentBg ? { backgroundImage: `url('/${currentBg}')`, zIndex: 50 } : { zIndex: 50 }}
     >
-      {/* Overlay - Kun hvis vi har bilde */}
       {currentBg && (
         <div className={`absolute inset-0 z-0 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       )}
@@ -144,10 +142,15 @@ function Display() {
              </span>
         </div>
 
+        {/* MIDTEN: Viser kun innhold når isMenuLoaded er true */}
         <div className="flex-1 flex flex-col justify-center gap-4 md:gap-8 my-2 overflow-hidden w-full">
-          <MenuSection title="Forrett" dish={dayData.starter} fallback={settings.starter} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-          <MenuSection title="Hovedrett" dish={dayData.main} fallback={settings.main} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-          <MenuSection title="Dessert" dish={dayData.dessert} fallback={settings.dessert} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+          {isMenuLoaded && (
+            <>
+              <MenuSection title="Forrett" dish={dayData.starter} fallback={settings.starter} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Hovedrett" dish={dayData.main} fallback={settings.main} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Dessert" dish={dayData.dessert} fallback={settings.dessert} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+            </>
+          )}
         </div>
 
         <div className="flex-none pb-2">
@@ -181,7 +184,7 @@ const MenuSection = ({ title, dish, fallback, delay, isDark, font, baseSize }) =
 // --- PREVIEW ---
 const PreviewScreen = ({ data, settings }) => {
   const isDark = settings.theme === 'dark';
-  const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0]; // I preview bruker vi default hvis ingen valgt
+  const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0];
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
