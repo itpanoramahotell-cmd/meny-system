@@ -81,7 +81,6 @@ function Display() {
   const [isMenuLoaded, setIsMenuLoaded] = useState(false);
   const today = getTodayStr();
 
-  // Settings state (Theme, Font, Text, etc - IKKE bakgrunnsbilde, det håndterer vi separat)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
     return saved ? JSON.parse(saved) : { 
@@ -94,33 +93,26 @@ function Display() {
 
   // --- BAKGRUNNSBILDE LOGIKK (STABIL FADE) ---
   const [currentBg, setCurrentBg] = useState(() => {
-      // Hent lagret bilde fra start for å unngå blink
       const saved = localStorage.getItem('menuSettings');
       return saved ? JSON.parse(saved).backgroundImage : null;
   });
-  const [incomingBg, setIncomingBg] = useState(null); // Bildet som skal fade inn
-  const [shouldFadeIn, setShouldFadeIn] = useState(false); // Trigger animasjonen
+  const [incomingBg, setIncomingBg] = useState(null);
+  const [shouldFadeIn, setShouldFadeIn] = useState(false);
 
   useEffect(() => {
-    // 1. Hent menydata
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
       if (d.exists()) setMenu(d.data());
       setIsMenuLoaded(true);
     });
     
-    // 2. Hent innstillinger
     const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
         setSettings(data);
         localStorage.setItem('menuSettings', JSON.stringify(data));
         
-        // Håndter bakgrunnsbilde separat for fading
         const newBg = data.backgroundImage;
-        
-        // Hvis vi har et nytt bilde, og det er ulikt det vi ser på, OG vi ikke allerede holder på å bytte til det
         if (newBg && newBg !== currentBg && newBg !== incomingBg) {
-             // Steg 1: Gjør klar det nye bildet (usynlig på toppen)
              setIncomingBg(newBg);
         }
       }
@@ -128,21 +120,16 @@ function Display() {
     return () => { unsubMenu(); unsubSettings(); };
   }, [currentBg, incomingBg]);
 
-  // Effekt som kjører når vi har et incomingBg klart
   useEffect(() => {
     if (incomingBg) {
-        // Vent en bitteliten stund så DOM-en rekker å tegne det nye bildet med opacity-0
         const frameId = requestAnimationFrame(() => {
-            setShouldFadeIn(true); // Start CSS transition til opacity-100
+            setShouldFadeIn(true);
         });
-
-        // Vent til animasjonen er ferdig (2 sekunder / 2000ms)
         const timer = setTimeout(() => {
-            setCurrentBg(incomingBg); // Gjør det nye bildet til hovedbilde
-            setIncomingBg(null);      // Fjern det midlertidige laget
-            setShouldFadeIn(false);   // Nullstill fade
+            setCurrentBg(incomingBg);
+            setIncomingBg(null);
+            setShouldFadeIn(false);
         }, 2000); 
-
         return () => {
             cancelAnimationFrame(frameId);
             clearTimeout(timer);
@@ -160,13 +147,13 @@ function Display() {
   return (
     <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black`}>
       
-      {/* 1. BASE LAYER: Det gjeldende bildet (Alltid synlig underst) */}
+      {/* 1. BASE LAYER */}
       <div 
         className={`absolute inset-0 bg-cover bg-center z-0 transition-none ${!currentBg ? 'admin-background' : ''}`}
         style={currentBg ? { backgroundImage: `url('/${currentBg}')` } : {}}
       ></div>
 
-      {/* 2. FADE LAYER: Det nye bildet som kommer inn (Ligger over base layer) */}
+      {/* 2. FADE LAYER */}
       {incomingBg && (
          <div 
            className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`}
@@ -174,28 +161,30 @@ function Display() {
          ></div>
       )}
 
-      {/* 3. OVERLAY: Mørk hinne (Ligger over begge bildene for å sikre lesbarhet) */}
+      {/* 3. OVERLAY */}
       {(currentBg || incomingBg) && (
         <div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       )}
 
-      {/* 4. CONTENT: Selve glassboksen (Ligger øverst) */}
+      {/* 4. CONTENT: Selve glassboksen */}
       <div 
         className={`
-          relative z-30 w-[90vw] aspect-video max-h-[85vh]
-          rounded-[3rem] text-center animate-fade-in transition-all duration-500
-          backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-10 px-6
+          relative z-30 w-[94vw] aspect-video max-h-[92vh]
+          rounded-[2.5rem] text-center animate-fade-in transition-all duration-500
+          backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-6 px-4
           ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}
         `}
         style={{ backgroundColor: bgStyle }}
       >
+        {/* TOPP: Låst høyde (flex-none) så den ikke forsvinner */}
         <div className="flex-none pt-2">
-             <span className={`text-2xl md:text-3xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
+             <span className={`text-xl md:text-2xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
                Dagens Meny
              </span>
         </div>
 
-        <div className="flex-1 flex flex-col justify-center gap-4 md:gap-8 my-2 overflow-hidden w-full">
+        {/* MIDTEN: Flex-1 lar den ta resten av plassen, men min-h-0 hindrer overflow */}
+        <div className="flex-1 flex flex-col justify-center gap-2 md:gap-4 my-2 overflow-hidden w-full min-h-0">
           {isMenuLoaded && (
             <>
               <MenuSection title="Forrett" dish={dayData.starter} allergens={dayData.starterAllergens} fallback={settings.starter} fallbackAllergens={settings.starterAllergens} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
@@ -205,8 +194,9 @@ function Display() {
           )}
         </div>
 
+        {/* BUNN: Låst høyde (flex-none) */}
         <div className="flex-none pb-2">
-            <p className={`text-4xl md:text-5xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
+            <p className={`text-3xl md:text-4xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
               Velbekomme
             </p>
         </div>
@@ -217,21 +207,25 @@ function Display() {
 
 const MenuSection = ({ title, dish, allergens, fallback, fallbackAllergens, delay, isDark, font, baseSize }) => {
   const text = dish || fallback || '...';
-  const allergensText = dish ? allergens : (allergens || fallbackAllergens);
+  // Hent allergener, og fjern "Allergener:" hvis kokken har skrevet det selv (case insensitive)
+  const rawAllergens = dish ? allergens : (allergens || fallbackAllergens);
+  const cleanAllergens = rawAllergens ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
+  
   const dynamicSizeClass = calculateFontSize(text, baseSize);
 
   return (
     <div className="opacity-0 animate-fade-in flex flex-col items-center justify-center w-full" style={{ animationDelay: delay }}>
-      <h2 className={`text-xl md:text-2xl uppercase tracking-[0.25em] font-sans font-semibold mb-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+      <h2 className={`text-lg md:text-xl uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
         {title}
       </h2>
       <div className="w-full px-2">
-        <p className={`${dynamicSizeClass} ${font} leading-tight py-1 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>
+        <p className={`${dynamicSizeClass} ${font} leading-tight py-0 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>
           {text}
         </p>
-        {allergensText && (
-          <p className={`text-xl md:text-3xl font-serif italic mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-            {allergensText}
+        {/* Allergen felt - Legger automatisk til "Allergener:" */}
+        {cleanAllergens && (
+          <p className={`text-lg md:text-xl font-serif mt-0 leading-tight ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+            <span className="font-bold italic">Allergener: </span><span className="italic">{cleanAllergens}</span>
           </p>
         )}
       </div>
@@ -253,23 +247,26 @@ const PreviewScreen = ({ data, settings }) => {
       <div className={`absolute inset-0 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       <div className="absolute inset-0 flex items-center justify-center p-2">
          <div 
-            className={`w-[90%] aspect-video rounded-lg flex flex-col items-center justify-between p-2 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`}
+            className={`w-[94%] aspect-video rounded-lg flex flex-col items-center justify-between p-2 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`}
             style={{ backgroundColor: bgStyle }}
          >
             <div className={`text-[0.4rem] uppercase tracking-widest font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>Dagens Meny</div>
-            <div className="flex-1 flex flex-col justify-center gap-1 w-full">
+            <div className="flex-1 flex flex-col justify-center gap-1 w-full min-h-0">
               {['Forrett', 'Hovedrett', 'Dessert'].map((t) => {
                 const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
                 const allergenKey = `${key}Allergens`;
                 const text = data[key] || settings[key] || '...';
-                const allergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
+                
+                const rawAllergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
+                const cleanAllergens = rawAllergens ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
+
                 return (
                   <div key={key}>
                     <p className={`text-[0.35rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
                     <p className={`text-lg ${currentFont} leading-tight truncate px-1`}>
                       {text}
                     </p>
-                    {allergens && <p className={`text-[0.3rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{allergens}</p>}
+                    {cleanAllergens && <p className={`text-[0.3rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>Allergener: {cleanAllergens}</p>}
                   </div>
                 )
               })}
@@ -405,7 +402,7 @@ function Admin() {
                     <div key={key} className="space-y-2">
                         <label className="text-xs uppercase font-bold text-stone-500 block">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
                         <input value={settings[key] || ''} onChange={(e) => handleSettingsChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="Retten..." />
-                        <input value={settings[`${key}Allergens`] || ''} onChange={(e) => handleSettingsChange(`${key}Allergens`, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Allergener (f.eks. Gluten, Melk)" />
+                        <input value={settings[`${key}Allergens`] || ''} onChange={(e) => handleSettingsChange(`${key}Allergens`, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Bare skriv allergenene (f.eks. Gluten, Melk)" />
                     </div>
                   ))}
                 </div>
@@ -427,7 +424,7 @@ function Admin() {
                             {!currentDayData[key] && settings[key] && <span className="text-[10px] text-stone-400 italic bg-stone-100 px-2 rounded border border-stone-200">Bruker standard</span>}
                         </div>
                         <input value={currentDayData[key] || ''} onChange={(e) => handleMenuChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-lg font-serif text-stone-900" placeholder={settings[key] ? `(Standard: ${settings[key]})` : "Skriv retten her..."} />
-                        <input value={currentDayData[allergenKey] || ''} onChange={(e) => handleMenuChange(allergenKey, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder={settings[allergenKey] ? `(Std. Allergener: ${settings[allergenKey]})` : "Allergener..."} />
+                        <input value={currentDayData[allergenKey] || ''} onChange={(e) => handleMenuChange(allergenKey, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder={settings[allergenKey] ? `(Std. Allergener: ${settings[allergenKey]})` : "Bare skriv allergenene (f.eks. Gluten, Melk)"} />
                     </div>
                   );
                 })}
