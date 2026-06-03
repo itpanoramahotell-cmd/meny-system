@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-do
 import { db, auth } from './firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { Monitor, LogOut, Copy, Check, Settings, ChevronLeft, Calendar, FileText, Sun, Image as ImageIcon, Type, Eye, Maximize } from 'lucide-react';
+import { Monitor, LogOut, Copy, Check, Settings, ChevronLeft, Calendar, FileText, Sun, Image as ImageIcon, Type, Eye, Maximize, Repeat, Trash2 } from 'lucide-react';
 
 // --- KONFIGURASJON ---
 const BACKGROUND_IMAGES = [
@@ -41,7 +41,16 @@ const OPACITY_LEVELS = [
   { value: 'bg-opacity-95', label: '95%', hexLight: 'rgba(255,255,255,0.95)', hexDark: 'rgba(0,0,0,0.95)' },
 ];
 
-// --- HJELPEFUNKSJONER ---
+const WEEKDAYS = [
+  { id: 1, label: 'Man' },
+  { id: 2, label: 'Tir' },
+  { id: 3, label: 'Ons' },
+  { id: 4, label: 'Tor' },
+  { id: 5, label: 'Fre' },
+  { id: 6, label: 'Lør' },
+  { id: 0, label: 'Søn' }
+];
+
 const getTodayStr = () => new Date().toISOString().split('T')[0];
 
 const getNext14Days = () => {
@@ -49,11 +58,7 @@ const getNext14Days = () => {
   for (let i = 0; i < 14; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    dates.push({
-      id: d.toISOString().split('T')[0],
-      display: d.toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' }),
-      fullDisplay: d.toLocaleDateString('no-NO', { weekday: 'long', day: 'numeric', month: 'long' })
-    });
+    dates.push({ id: d.toISOString().split('T')[0], display: d.toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' }), fullDisplay: d.toLocaleDateString('no-NO', { weekday: 'long', day: 'numeric', month: 'long' }) });
   }
   return dates;
 };
@@ -83,15 +88,9 @@ function Display() {
 
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
-    return saved ? JSON.parse(saved) : { 
-      theme: 'light', 
-      fontFamily: 'font-great-vibes',
-      fontSize: 'lvl3',
-      opacityLevel: 2 
-    };
+    return saved ? JSON.parse(saved) : { theme: 'light', fontFamily: 'font-great-vibes', fontSize: 'lvl3', opacityLevel: 2, globalTopText: '', globalBottomText: '', recurringMenus: [] };
   });
 
-  // --- BAKGRUNNSBILDE LOGIKK (STABIL FADE) ---
   const [currentBg, setCurrentBg] = useState(() => {
       const saved = localStorage.getItem('menuSettings');
       return saved ? JSON.parse(saved).backgroundImage : null;
@@ -99,44 +98,48 @@ function Display() {
   const [incomingBg, setIncomingBg] = useState(null);
   const [shouldFadeIn, setShouldFadeIn] = useState(false);
 
+  const currentBgRef = useRef(currentBg);
+  const incomingBgRef = useRef(incomingBg);
+
   useEffect(() => {
-    const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => {
-      if (d.exists()) setMenu(d.data());
-      setIsMenuLoaded(true);
-    });
-    
-    const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSettings(data);
-        localStorage.setItem('menuSettings', JSON.stringify(data));
-        
-        const newBg = data.backgroundImage;
-        if (newBg && newBg !== currentBg && newBg !== incomingBg) {
-             setIncomingBg(newBg);
-        }
-      }
-    });
-    return () => { unsubMenu(); unsubSettings(); };
+     currentBgRef.current = currentBg;
+     incomingBgRef.current = incomingBg;
   }, [currentBg, incomingBg]);
 
   useEffect(() => {
+    const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), 
+      (d) => { if (d.exists()) setMenu(d.data()); setIsMenuLoaded(true); },
+      (error) => { console.error(error); setIsMenuLoaded(true); }
+    );
+    
+    const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), 
+      (doc) => {
+        if (doc.exists()) {
+          const data = doc.data();
+          setSettings(data);
+          localStorage.setItem('menuSettings', JSON.stringify(data));
+          const newBg = data.backgroundImage;
+          if (newBg && newBg !== currentBgRef.current && newBg !== incomingBgRef.current) {
+               setIncomingBg(newBg);
+          }
+        }
+      },
+      (error) => console.error(error)
+    );
+    return () => { unsubMenu(); unsubSettings(); };
+  }, []);
+
+  useEffect(() => {
     if (incomingBg) {
-        const frameId = requestAnimationFrame(() => {
-            setShouldFadeIn(true);
-        });
+        const frameId = requestAnimationFrame(() => setShouldFadeIn(true));
         const timer = setTimeout(() => {
             setCurrentBg(incomingBg);
             setIncomingBg(null);
             setShouldFadeIn(false);
         }, 2000); 
-        return () => {
-            cancelAnimationFrame(frameId);
-            clearTimeout(timer);
-        }
+        return () => { cancelAnimationFrame(frameId); clearTimeout(timer); }
     }
   }, [incomingBg]);
-
 
   const dayData = menu[today] || {};
   const isDark = settings.theme === 'dark';
@@ -144,90 +147,74 @@ function Display() {
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
 
+  // Håndtering av repeterende/faste menyer basert på ukedag og datointervall
+  const recurringRules = settings.recurringMenus || [];
+  const currentDayOfWeek = new Date().getDay(); // 0 = Søn, 1 = Man osv.
+  
+  const matchingRule = recurringRules.find(rule => {
+    return today >= rule.startDate && today <= rule.endDate && rule.weekdays.includes(currentDayOfWeek);
+  });
+
+  // Relevante data basert på prioritet: Daglig -> Fast regel -> Global standard
+  const finalStarter = dayData.starter || (matchingRule ? matchingRule.starter : settings.starter);
+  const finalStarterAllergens = dayData.starter ? dayData.starterAllergens : (dayData.starterAllergens || (matchingRule ? matchingRule.starterAllergens : settings.starterAllergens));
+  
+  const finalMain = dayData.main || (matchingRule ? matchingRule.main : settings.main);
+  const finalMainAllergens = dayData.main ? dayData.mainAllergens : (dayData.mainAllergens || (matchingRule ? matchingRule.mainAllergens : settings.mainAllergens));
+  
+  const finalDessert = dayData.dessert || (matchingRule ? matchingRule.dessert : settings.dessert);
+  const finalDessertAllergens = dayData.dessert ? dayData.dessertAllergens : (dayData.dessertAllergens || (matchingRule ? matchingRule.dessertAllergens : settings.dessertAllergens));
+
   return (
     <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black`}>
-      
-      {/* 1. BASE LAYER */}
-      <div 
-        className={`absolute inset-0 bg-cover bg-center z-0 transition-none ${!currentBg ? 'admin-background' : ''}`}
-        style={currentBg ? { backgroundImage: `url('/${currentBg}')` } : {}}
-      ></div>
+      <div className={`absolute inset-0 bg-cover bg-center z-0 transition-none ${!currentBg ? 'admin-background' : ''}`} style={currentBg ? { backgroundImage: `url('/${currentBg}')` } : {}}></div>
+      {incomingBg && (<div className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url('/${incomingBg}')` }}></div>)}
+      {(currentBg || incomingBg) && (<div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>)}
 
-      {/* 2. FADE LAYER */}
-      {incomingBg && (
-         <div 
-           className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`}
-           style={{ backgroundImage: `url('/${incomingBg}')` }}
-         ></div>
-      )}
-
-      {/* 3. OVERLAY */}
-      {(currentBg || incomingBg) && (
-        <div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
-      )}
-
-      {/* 4. CONTENT: Selve glassboksen */}
-      <div 
-        className={`
-          relative z-30 w-[94vw] aspect-video max-h-[92vh]
-          rounded-[2.5rem] text-center animate-fade-in transition-all duration-500
-          backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-6 px-4
-          ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}
-        `}
-        style={{ backgroundColor: bgStyle }}
-      >
-        {/* TOPP: Låst høyde (flex-none) så den ikke forsvinner */}
-        <div className="flex-none pt-2">
-             <span className={`text-xl md:text-2xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
-               Dagens Meny
-             </span>
+      <div className={`relative z-30 w-[94vw] aspect-video max-h-[92vh] rounded-[2.5rem] text-center animate-fade-in transition-all duration-500 backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-4 px-4 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
+        
+        {/* TOPP */}
+        <div className="flex-none pt-1">
+             <span className={`text-xl md:text-2xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>Dagens Meny</span>
+             {settings.globalTopText && (
+               <p className={`text-lg md:text-xl font-sans font-semibold tracking-wide mt-0.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{settings.globalTopText}</p>
+             )}
         </div>
 
-        {/* MIDTEN: Flex-1 lar den ta resten av plassen, men min-h-0 hindrer overflow */}
-        <div className="flex-1 flex flex-col justify-center gap-2 md:gap-4 my-2 overflow-hidden w-full min-h-0">
+        {/* MIDTEN */}
+        <div className="flex-1 flex flex-col justify-center gap-1 md:gap-3 my-1 overflow-hidden w-full min-h-0">
           {isMenuLoaded && (
             <>
-              <MenuSection title="Forrett" dish={dayData.starter} allergens={dayData.starterAllergens} fallback={settings.starter} fallbackAllergens={settings.starterAllergens} delay="0s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Hovedrett" dish={dayData.main} allergens={dayData.mainAllergens} fallback={settings.main} fallbackAllergens={settings.mainAllergens} delay="0.1s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Dessert" dish={dayData.dessert} allergens={dayData.dessertAllergens} fallback={settings.dessert} fallbackAllergens={settings.dessertAllergens} delay="0.2s" isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Forrett" dish={finalStarter} allergens={finalStarterAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Hovedrett" dish={finalMain} allergens={finalMainAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              <MenuSection title="Dessert" dish={finalDessert} allergens={finalDessertAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
             </>
           )}
         </div>
 
-        {/* BUNN: Låst høyde (flex-none) */}
-        <div className="flex-none pb-2">
-            <p className={`text-3xl md:text-4xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
-              Velbekomme
-            </p>
+        {/* BUNN */}
+        <div className="flex-none pb-1">
+            {settings.globalBottomText && (
+               <p className={`text-md md:text-lg font-sans tracking-wide mb-0.5 font-medium ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{settings.globalBottomText}</p>
+            )}
+            <p className={`text-3xl md:text-4xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Velbekomme</p>
         </div>
       </div>
     </div>
   );
 }
 
-const MenuSection = ({ title, dish, allergens, fallback, fallbackAllergens, delay, isDark, font, baseSize }) => {
-  const text = dish || fallback || '...';
-  // Hent allergener, og fjern "Allergener:" hvis kokken har skrevet det selv (case insensitive)
-  const rawAllergens = dish ? allergens : (allergens || fallbackAllergens);
-  const cleanAllergens = rawAllergens ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
-  
+const MenuSection = ({ title, dish, allergens, isDark, font, baseSize }) => {
+  const text = dish || '...';
+  const cleanAllergens = (typeof allergens === 'string') ? allergens.replace(/^Allergener:\s*/i, '') : null;
   const dynamicSizeClass = calculateFontSize(text, baseSize);
 
   return (
-    <div className="opacity-0 animate-fade-in flex flex-col items-center justify-center w-full" style={{ animationDelay: delay }}>
-      <h2 className={`text-lg md:text-xl uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-        {title}
-      </h2>
+    <div className="flex flex-col items-center justify-center w-full">
+      <h2 className={`text-xs md:text-sm uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{title}</h2>
       <div className="w-full px-2">
-        <p className={`${dynamicSizeClass} ${font} leading-tight py-0 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>
-          {text}
-        </p>
-        {/* Allergen felt - Legger automatisk til "Allergener:" */}
-        {cleanAllergens && (
-          <p className={`text-lg md:text-xl font-serif mt-0 leading-tight ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-            <span className="font-bold italic">Allergener: </span><span className="italic">{cleanAllergens}</span>
-          </p>
-        )}
+        <p className={`${dynamicSizeClass} ${font} leading-tight py-0 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>{text}</p>
+        {cleanAllergens && (<p className={`text-sm md:text-base font-serif mt-0 leading-tight ${isDark ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold italic">Allergener: </span><span className="italic">{cleanAllergens}</span></p>)}
       </div>
     </div>
   );
@@ -240,38 +227,36 @@ const PreviewScreen = ({ data, settings }) => {
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
-  
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden shadow-inner border border-stone-300">
       <div className="absolute inset-0 bg-cover bg-center transition-all duration-500" style={{ backgroundImage: `url('/${currentBg}')` }}></div>
       <div className={`absolute inset-0 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       <div className="absolute inset-0 flex items-center justify-center p-2">
-         <div 
-            className={`w-[94%] aspect-video rounded-lg flex flex-col items-center justify-between p-2 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`}
-            style={{ backgroundColor: bgStyle }}
-         >
-            <div className={`text-[0.4rem] uppercase tracking-widest font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>Dagens Meny</div>
-            <div className="flex-1 flex flex-col justify-center gap-1 w-full min-h-0">
+         <div className={`w-[94%] aspect-video rounded-lg flex flex-col items-center justify-between p-1.5 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
+            <div className={`text-[0.4rem] uppercase tracking-widest font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
+              Dagens Meny
+              {settings.globalTopText && <div className="text-[0.3rem] font-normal lowercase tracking-normal">{settings.globalTopText}</div>}
+            </div>
+            <div className="flex-1 flex flex-col justify-center gap-0.5 w-full min-h-0">
               {['Forrett', 'Hovedrett', 'Dessert'].map((t) => {
                 const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
                 const allergenKey = `${key}Allergens`;
                 const text = data[key] || settings[key] || '...';
-                
                 const rawAllergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
-                const cleanAllergens = rawAllergens ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
-
+                const cleanAllergens = (typeof rawAllergens === 'string') ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
                 return (
                   <div key={key}>
-                    <p className={`text-[0.35rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
-                    <p className={`text-lg ${currentFont} leading-tight truncate px-1`}>
-                      {text}
-                    </p>
-                    {cleanAllergens && <p className={`text-[0.3rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>Allergener: {cleanAllergens}</p>}
+                    <p className={`text-[0.25rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
+                    <p className={`text-sm ${currentFont} leading-tight truncate px-1`}>{text}</p>
+                    {cleanAllergens && <p className={`text-[0.25rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>Allergener: {cleanAllergens}</p>}
                   </div>
                 )
               })}
             </div>
-             <div className={`text-[0.5rem] ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Velbekomme</div>
+             <div className={`text-[0.4rem] ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
+               {settings.globalBottomText && <p className="text-[0.25rem] font-sans mb-0">{settings.globalBottomText}</p>}
+               <span className={currentFont}>Velbekomme</span>
+             </div>
          </div>
       </div>
     </div>
@@ -308,15 +293,22 @@ function Admin() {
   const [selectedDate, setSelectedDate] = useState(dates[0]);
   const [fullMenu, setFullMenu] = useState({});
   const [settings, setSettings] = useState({ 
-    starter: '', starterAllergens: '',
-    main: '', mainAllergens: '',
-    dessert: '', dessertAllergens: '',
-    theme: 'light', backgroundImage: BACKGROUND_IMAGES[0],
-    fontFamily: 'font-great-vibes', fontSize: 'lvl3',
-    opacityLevel: 2
+    starter: '', starterAllergens: '', main: '', mainAllergens: '', dessert: '', dessertAllergens: '',
+    theme: 'light', backgroundImage: BACKGROUND_IMAGES[0], fontFamily: 'font-great-vibes', fontSize: 'lvl3', opacityLevel: 2,
+    globalTopText: '', globalBottomText: '', recurringMenus: []
   });
   const [activeTab, setActiveTab] = useState('daily');
   const navigate = useNavigate();
+
+  // Lokalt state for opprettelse av ny fast meny (ukedagsregel)
+  const [newRule, setNewRule] = useState({
+    startDate: getTodayStr(),
+    endDate: getTodayStr(),
+    weekdays: [],
+    starter: '', starterAllergens: '',
+    main: '', mainAllergens: '',
+    dessert: '', dessertAllergens: ''
+  });
 
   useEffect(() => {
     const unsub1 = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => d.exists() && setFullMenu(d.data()));
@@ -336,6 +328,29 @@ function Admin() {
     const newSettings = { ...settings, [field]: val };
     setSettings(newSettings); saveData("settings", newSettings);
   };
+
+  const handleAddRecurringRule = () => {
+    if (newRule.weekdays.length === 0) { alert('Velg minst én ukedag'); return; }
+    const ruleWithId = { ...newRule, id: Date.now().toString() };
+    const updatedRules = [...(settings.recurringMenus || []), ruleWithId];
+    handleSettingsChange('recurringMenus', updatedRules);
+    // Nullstill skjema felt
+    setNewRule({ startDate: getTodayStr(), endDate: getTodayStr(), weekdays: [], starter: '', starterAllergens: '', main: '', mainAllergens: '', dessert: '', dessertAllergens: '' });
+  };
+
+  const handleDeleteRecurringRule = (id) => {
+    const updatedRules = (settings.recurringMenus || []).filter(r => r.id !== id);
+    handleSettingsChange('recurringMenus', updatedRules);
+  };
+
+  const toggleWeekdayInRule = (dayId) => {
+    const currentDays = [...newRule.weekdays];
+    if (currentDays.includes(dayId)) {
+      setNewRule({ ...newRule, weekdays: currentDays.filter(d => d !== dayId) });
+    } else {
+      setNewRule({ ...newRule, weekdays: [...currentDays, dayId] });
+    }
+  };
   
   const currentDayData = fullMenu[selectedDate.id] || {};
 
@@ -348,8 +363,9 @@ function Admin() {
         </div>
 
         <div className="lg:col-span-7 space-y-6">
-          <div className="bg-stone-200/50 p-1 rounded-xl flex gap-1 shadow-inner max-w-md">
+          <div className="bg-stone-200/50 p-1 rounded-xl flex gap-1 shadow-inner max-w-xl">
             <button onClick={() => setActiveTab('daily')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'daily' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}><Calendar size={16} /> Daglig Meny</button>
+            <button onClick={() => setActiveTab('recurring')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'recurring' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}><Repeat size={16} /> Faste Menyer</button>
             <button onClick={() => setActiveTab('settings')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'settings' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}><Settings size={16} /> Innstillinger</button>
           </div>
 
@@ -370,6 +386,22 @@ function Admin() {
                 </div>
               </div>
               <div className="border-t border-stone-200"></div>
+              
+              <div>
+                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Globale Tekstfelt (Viser inntil endret manuelt)</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Topptekst / Pris (Plassert under "Dagens Meny")</label>
+                    <input value={settings.globalTopText || ''} onChange={(e) => handleSettingsChange('globalTopText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: 3-retters meny kr 695,-" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Bunntekst (Plassert rett over "Velbekomme")</label>
+                    <input value={settings.globalBottomText || ''} onChange={(e) => handleSettingsChange('globalBottomText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: Drikke bestilles i baren" />
+                  </div>
+                </div>
+              </div>
+              <div className="border-t border-stone-200"></div>
+
               <div>
                 <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><Sun size={18} /> Utseende & Gjennomsiktighet</h2>
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -405,6 +437,73 @@ function Admin() {
                         <input value={settings[`${key}Allergens`] || ''} onChange={(e) => handleSettingsChange(`${key}Allergens`, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Bare skriv allergenene (f.eks. Gluten, Melk)" />
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'recurring' ? (
+            <div className="glass-panel p-8 rounded-3xl animate-fade-in space-y-8">
+              <div>
+                <h2 className="text-xl font-serif text-stone-800 mb-4 flex items-center gap-2"><Repeat size={20} /> Opprett Fast Meny</h2>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-1">Fra dato</label>
+                    <input type="date" value={newRule.startDate} onChange={(e) => setNewRule({ ...newRule, startDate: e.target.value })} className="w-full glass-input p-3 rounded-xl text-stone-800" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-1">Til dato</label>
+                    <input type="date" value={newRule.endDate} onChange={(e) => setNewRule({ ...newRule, endDate: e.target.value })} className="w-full glass-input p-3 rounded-xl text-stone-800" />
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Velg ukedager regelen gjelder for</label>
+                  <div className="flex flex-wrap gap-2">
+                    {WEEKDAYS.map(day => (
+                      <button key={day.id} onClick={() => toggleWeekdayInRule(day.id)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${newRule.weekdays.includes(day.id) ? 'bg-stone-800 text-white border-stone-800' : 'bg-white/60 text-stone-700 border-stone-300 hover:bg-white'}`}>
+                        {day.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 border-t border-stone-200/50 pt-4">
+                  {['starter', 'main', 'dessert'].map((key) => (
+                    <div key={key} className="space-y-1">
+                      <label className="text-xs uppercase font-bold text-stone-500 block">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
+                      <input value={newRule[key]} onChange={(e) => setNewRule({ ...newRule, [key]: e.target.value })} className="w-full glass-input p-3 rounded-xl text-stone-800 text-sm" placeholder="Rettens navn..." />
+                      <input value={newRule[`${key}Allergens`]} onChange={(e) => setNewRule({ ...newRule, [`${key}Allergens`]: e.target.value })} className="w-full glass-input p-2 rounded-lg text-xs text-stone-600 italic" placeholder="Allergener..." />
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={handleAddRecurringRule} className="w-full bg-stone-900 text-white p-3 rounded-xl font-bold hover:bg-stone-800 transition-all shadow mt-6">
+                  Lagre Fast Meny-regel
+                </button>
+              </div>
+
+              {/* LISTE OVER AKTIVE REGLER */}
+              <div className="border-t border-stone-200 pt-6">
+                <h3 className="text-lg font-serif text-stone-800 mb-4">Aktive faste menyer</h3>
+                <div className="space-y-3">
+                  {(settings.recurringMenus || []).length === 0 ? (
+                    <p className="text-sm text-stone-400 italic">Ingen faste menyer er opprettet ennå.</p>
+                  ) : (
+                    (settings.recurringMenus || []).map((rule) => {
+                      const daysText = rule.weekdays.map(id => WEEKDAYS.find(w => w.id === id)?.label).join(', ');
+                      return (
+                        <div key={rule.id} className="bg-white/60 border border-stone-200 rounded-xl p-4 flex justify-between items-start gap-4 shadow-sm animate-fade-in">
+                          <div className="text-xs space-y-1 text-stone-700">
+                            <p className="font-bold text-stone-900">Ukedager: [{daysText}]</p>
+                            <p className="text-stone-500 font-mono">Periode: {rule.startDate} til {rule.endDate}</p>
+                            <p className="mt-1 truncate max-w-md"><span className="font-semibold">F:</span> {rule.starter || '—'} | <span className="font-semibold">H:</span> {rule.main || '—'} | <span className="font-semibold">D:</span> {rule.dessert || '—'}</p>
+                          </div>
+                          <button onClick={() => handleDeleteRecurringRule(rule.id)} className="text-red-500 hover:text-red-700 p-1 bg-white rounded-lg border border-stone-200 transition-all">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               </div>
             </div>
