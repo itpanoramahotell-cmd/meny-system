@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-do
 import { db, auth } from './firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { Monitor, LogOut, Copy, Check, Settings, ChevronLeft, Calendar, FileText, Sun, Image as ImageIcon, Type, Eye, Maximize, Repeat, Trash2 } from 'lucide-react';
+import { Monitor, LogOut, Copy, Check, Settings, ChevronLeft, Calendar, FileText, Sun, Image as ImageIcon, Type, Eye, Maximize, Repeat, Trash2, Edit2, X } from 'lucide-react';
 
 // --- KONFIGURASJON ---
 const BACKGROUND_IMAGES = [
@@ -42,13 +42,8 @@ const OPACITY_LEVELS = [
 ];
 
 const WEEKDAYS = [
-  { id: 1, label: 'Man' },
-  { id: 2, label: 'Tir' },
-  { id: 3, label: 'Ons' },
-  { id: 4, label: 'Tor' },
-  { id: 5, label: 'Fre' },
-  { id: 6, label: 'Lør' },
-  { id: 0, label: 'Søn' }
+  { id: 1, label: 'Man' }, { id: 2, label: 'Tir' }, { id: 3, label: 'Ons' },
+  { id: 4, label: 'Tor' }, { id: 5, label: 'Fre' }, { id: 6, label: 'Lør' }, { id: 0, label: 'Søn' }
 ];
 
 const getTodayStr = () => new Date().toISOString().split('T')[0];
@@ -88,7 +83,7 @@ function Display() {
 
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('menuSettings');
-    return saved ? JSON.parse(saved) : { theme: 'light', fontFamily: 'font-great-vibes', fontSize: 'lvl3', opacityLevel: 2, globalTopText: '', globalBottomText: '', recurringMenus: [] };
+    return saved ? JSON.parse(saved) : { theme: 'light', fontFamily: 'font-great-vibes', fontSize: 'lvl3', opacityLevel: 2, globalTopText: '', globalBottomText: '', recurringMenus: [], starterPrice: '', mainPrice: '', dessertPrice: '' };
   });
 
   const [currentBg, setCurrentBg] = useState(() => {
@@ -101,17 +96,13 @@ function Display() {
   const currentBgRef = useRef(currentBg);
   const incomingBgRef = useRef(incomingBg);
 
-  useEffect(() => {
-     currentBgRef.current = currentBg;
-     incomingBgRef.current = incomingBg;
-  }, [currentBg, incomingBg]);
+  useEffect(() => { currentBgRef.current = currentBg; incomingBgRef.current = incomingBg; }, [currentBg, incomingBg]);
 
   useEffect(() => {
     const unsubMenu = onSnapshot(doc(db, "restaurants", "dailyMenu"), 
       (d) => { if (d.exists()) setMenu(d.data()); setIsMenuLoaded(true); },
       (error) => { console.error(error); setIsMenuLoaded(true); }
     );
-    
     const unsubSettings = onSnapshot(doc(db, "restaurants", "settings"), 
       (doc) => {
         if (doc.exists()) {
@@ -119,9 +110,7 @@ function Display() {
           setSettings(data);
           localStorage.setItem('menuSettings', JSON.stringify(data));
           const newBg = data.backgroundImage;
-          if (newBg && newBg !== currentBgRef.current && newBg !== incomingBgRef.current) {
-               setIncomingBg(newBg);
-          }
+          if (newBg && newBg !== currentBgRef.current && newBg !== incomingBgRef.current) setIncomingBg(newBg);
         }
       },
       (error) => console.error(error)
@@ -132,11 +121,7 @@ function Display() {
   useEffect(() => {
     if (incomingBg) {
         const frameId = requestAnimationFrame(() => setShouldFadeIn(true));
-        const timer = setTimeout(() => {
-            setCurrentBg(incomingBg);
-            setIncomingBg(null);
-            setShouldFadeIn(false);
-        }, 2000); 
+        const timer = setTimeout(() => { setCurrentBg(incomingBg); setIncomingBg(null); setShouldFadeIn(false); }, 2000); 
         return () => { cancelAnimationFrame(frameId); clearTimeout(timer); }
     }
   }, [incomingBg]);
@@ -147,56 +132,85 @@ function Display() {
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
 
-  // Håndtering av repeterende/faste menyer basert på ukedag og datointervall
   const recurringRules = settings.recurringMenus || [];
-  const currentDayOfWeek = new Date().getDay(); // 0 = Søn, 1 = Man osv.
-  
-  const matchingRule = recurringRules.find(rule => {
-    return today >= rule.startDate && today <= rule.endDate && rule.weekdays.includes(currentDayOfWeek);
-  });
+  const currentDayOfWeek = new Date().getDay();
+  const matchingRule = recurringRules.find(rule => today >= rule.startDate && today <= rule.endDate && rule.weekdays.includes(currentDayOfWeek));
 
-  // Relevante data basert på prioritet: Daglig -> Fast regel -> Global standard
-  const finalStarter = dayData.starter || (matchingRule ? matchingRule.starter : settings.starter);
-  const finalStarterAllergens = dayData.starter ? dayData.starterAllergens : (dayData.starterAllergens || (matchingRule ? matchingRule.starterAllergens : settings.starterAllergens));
-  
-  const finalMain = dayData.main || (matchingRule ? matchingRule.main : settings.main);
-  const finalMainAllergens = dayData.main ? dayData.mainAllergens : (dayData.mainAllergens || (matchingRule ? matchingRule.mainAllergens : settings.mainAllergens));
-  
-  const finalDessert = dayData.dessert || (matchingRule ? matchingRule.dessert : settings.dessert);
-  const finalDessertAllergens = dayData.dessert ? dayData.dessertAllergens : (dayData.dessertAllergens || (matchingRule ? matchingRule.dessertAllergens : settings.dessertAllergens));
+  const activeData = (dayData && Object.keys(dayData).length > 0) ? dayData : (matchingRule ? matchingRule : settings);
+  const menuType = activeData.menuType || '3-course';
+
+  const getPrice = (key) => activeData[`${key}Price`] !== undefined && activeData[`${key}Price`] !== '' ? activeData[`${key}Price`] : settings[`${key}Price`];
 
   return (
-    <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black`}>
+    <div className="fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black">
       <div className={`absolute inset-0 bg-cover bg-center z-0 transition-none ${!currentBg ? 'admin-background' : ''}`} style={currentBg ? { backgroundImage: `url('/${currentBg}')` } : {}}></div>
       {incomingBg && (<div className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url('/${incomingBg}')` }}></div>)}
       {(currentBg || incomingBg) && (<div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>)}
 
-      <div className={`relative z-30 w-[94vw] aspect-video max-h-[92vh] rounded-[2.5rem] text-center animate-fade-in transition-all duration-500 backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-4 px-4 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
+      {/* RAMMEN: w- og h- skalerer dynamisk, fyller 94% av skjermarealet uansett rotasjon */}
+      <div className={`relative z-30 w-[94vw] h-[94vh] rounded-[2.5rem] text-center animate-fade-in transition-all duration-500 backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-8 px-6 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
         
         {/* TOPP */}
-        <div className="flex-none pt-1">
+        <div className="flex-none">
              <span className={`text-xl md:text-2xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>Dagens Meny</span>
-             {settings.globalTopText && (
-               <p className={`text-lg md:text-xl font-sans font-semibold tracking-wide mt-0.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{settings.globalTopText}</p>
-             )}
+             {settings.globalTopText && <p className={`text-lg md:text-xl font-sans font-semibold tracking-wide mt-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{settings.globalTopText}</p>}
         </div>
 
-        {/* MIDTEN */}
-        <div className="flex-1 flex flex-col justify-center gap-1 md:gap-3 my-1 overflow-hidden w-full min-h-0">
-          {isMenuLoaded && (
-            <>
-              <MenuSection title="Forrett" dish={finalStarter} allergens={finalStarterAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Hovedrett" dish={finalMain} allergens={finalMainAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              <MenuSection title="Dessert" dish={finalDessert} allergens={finalDessertAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-            </>
+        {/* MIDTEN: Sentrert innholdsblokk med kontrollerte, faste mellomrom for å unngå strekking */}
+        <div className="flex-1 flex flex-col justify-center items-center my-4 overflow-hidden w-full min-h-0">
+          {isMenuLoaded && menuType === '3-course' && (
+            <div className="w-full max-w-4xl space-y-4 md:space-y-6 flex flex-col items-center">
+              <MenuSection title="Forrett" price={getPrice('starter')} dish={activeData.starter} allergens={activeData.starterAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              
+              {/* SUBTIL SKILLELINJE */}
+              <div className={`w-24 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-current to-transparent`}></div>
+              
+              <MenuSection title="Hovedrett" price={getPrice('main')} dish={activeData.main} allergens={activeData.mainAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+              
+              {/* SUBTIL SKILLELINJE */}
+              <div className={`w-24 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-current to-transparent`}></div>
+              
+              <MenuSection title="Dessert" price={getPrice('dessert')} dish={activeData.dessert} allergens={activeData.dessertAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
+            </div>
+          )}
+
+          {isMenuLoaded && menuType === 'buffet' && (
+             <div className="flex flex-col items-center justify-center h-full w-full max-w-4xl mx-auto space-y-4 md:space-y-6">
+                <div className="space-y-2">
+                   {activeData.buffetName && <h2 className={`text-2xl md:text-4xl uppercase tracking-widest font-serif ${isDark ? 'text-white' : 'text-stone-900'}`}>{activeData.buffetName}</h2>}
+                   {activeData.buffetIntro && <p className={`text-base md:text-xl font-serif italic ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{activeData.buffetIntro}</p>}
+                </div>
+                
+                <h3 className={`text-sm md:text-lg font-sans uppercase tracking-widest border-b pb-1 ${isDark ? 'text-stone-400 border-stone-600' : 'text-stone-500 border-stone-400'}`}>Hva serveres på buffeten?</h3>
+                
+                <div className="w-full space-y-4">
+                   {activeData.buffetColdText && (
+                     <div>
+                        <h4 className={`text-lg md:text-2xl font-serif mb-1 ${isDark ? 'text-stone-200' : 'text-stone-800'}`}>{activeData.buffetColdTitle || 'Kalde retter'}</h4>
+                        <p className={`text-base md:text-lg font-sans ${isDark ? 'text-stone-400' : 'text-stone-700'}`}>{activeData.buffetColdText}</p>
+                     </div>
+                   )}
+                   {activeData.buffetWarmText && (
+                     <div>
+                        <h4 className={`text-lg md:text-2xl font-serif mb-1 ${isDark ? 'text-stone-200' : 'text-stone-800'}`}>{activeData.buffetWarmTitle || 'Varme retter'}</h4>
+                        <p className={`text-base md:text-lg font-sans ${isDark ? 'text-stone-400' : 'text-stone-700'}`}>{activeData.buffetWarmText}</p>
+                        {activeData.buffetPS && <p className={`text-xs md:text-sm mt-1 italic ${isDark ? 'text-stone-500' : 'text-stone-500'}`}>{activeData.buffetPS}</p>}
+                     </div>
+                   )}
+                   {activeData.buffetDessertText && (
+                     <div>
+                        <h4 className={`text-lg md:text-2xl font-serif mb-1 ${isDark ? 'text-stone-200' : 'text-stone-800'}`}>{activeData.buffetDessertTitle || 'Dessert'}</h4>
+                        <p className={`text-base md:text-lg font-sans ${isDark ? 'text-stone-400' : 'text-stone-700'}`}>{activeData.buffetDessertText}</p>
+                     </div>
+                   )}
+                </div>
+             </div>
           )}
         </div>
 
         {/* BUNN */}
-        <div className="flex-none pb-1">
-            {settings.globalBottomText && (
-               <p className={`text-md md:text-lg font-sans tracking-wide mb-0.5 font-medium ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{settings.globalBottomText}</p>
-            )}
+        <div className="flex-none">
+            {settings.globalBottomText && <p className={`text-md md:text-lg font-sans tracking-wide mb-1 font-medium ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{settings.globalBottomText}</p>}
             <p className={`text-3xl md:text-4xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Velbekomme</p>
         </div>
       </div>
@@ -204,17 +218,29 @@ function Display() {
   );
 }
 
-const MenuSection = ({ title, dish, allergens, isDark, font, baseSize }) => {
+const MenuSection = ({ title, price, dish, allergens, isDark, font, baseSize }) => {
   const text = dish || '...';
   const cleanAllergens = (typeof allergens === 'string') ? allergens.replace(/^Allergener:\s*/i, '') : null;
   const dynamicSizeClass = calculateFontSize(text, baseSize);
 
   return (
     <div className="flex flex-col items-center justify-center w-full">
-      <h2 className={`text-xs md:text-sm uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{title}</h2>
-      <div className="w-full px-2">
+      {/* OVERSKRIFTMED ABSOLUTT HØYREJUSTERT PRIS FOR PERFEKT SENTRERING */}
+      <div className="relative flex items-center justify-center">
+        <h2 className={`text-xs md:text-sm uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+          {title}
+        </h2>
+        {price && (
+          <span className="absolute left-full flex items-center whitespace-nowrap text-sm md:text-lg font-sans font-black tracking-normal">
+            <span className="mx-4 opacity-30 text-xs font-normal">|</span>
+            <span className={isDark ? 'text-white' : 'text-stone-900'}>{price},-</span>
+          </span>
+        )}
+      </div>
+      
+      <div className="w-full px-2 mt-1">
         <p className={`${dynamicSizeClass} ${font} leading-tight py-0 break-words ${isDark ? 'text-white' : 'text-stone-900'}`}>{text}</p>
-        {cleanAllergens && (<p className={`text-sm md:text-base font-serif mt-0 leading-tight ${isDark ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold italic">Allergener: </span><span className="italic">{cleanAllergens}</span></p>)}
+        {cleanAllergens && (<p className={`text-sm md:text-base font-serif mt-0.5 leading-tight ${isDark ? 'text-stone-400' : 'text-stone-600'}`}><span className="font-bold italic">Allergener: </span><span className="italic">{cleanAllergens}</span></p>)}
       </div>
     </div>
   );
@@ -227,32 +253,58 @@ const PreviewScreen = ({ data, settings }) => {
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
+  
+  const activeData = (data && Object.keys(data).length > 0) ? data : settings;
+  const menuType = activeData.menuType || '3-course';
+
+  const getPrice = (key) => activeData[`${key}Price`] !== undefined && activeData[`${key}Price`] !== '' ? activeData[`${key}Price`] : settings[`${key}Price`];
+
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden shadow-inner border border-stone-300">
       <div className="absolute inset-0 bg-cover bg-center transition-all duration-500" style={{ backgroundImage: `url('/${currentBg}')` }}></div>
       <div className={`absolute inset-0 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>
       <div className="absolute inset-0 flex items-center justify-center p-2">
-         <div className={`w-[94%] aspect-video rounded-lg flex flex-col items-center justify-between p-1.5 text-center backdrop-blur-sm border transition-all duration-300 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
+         <div className="w-[94%] h-[94%] rounded-lg flex flex-col items-center justify-between p-2 text-center backdrop-blur-sm border transition-all duration-300" style={{ backgroundColor: bgStyle }}>
             <div className={`text-[0.4rem] uppercase tracking-widest font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>
               Dagens Meny
               {settings.globalTopText && <div className="text-[0.3rem] font-normal lowercase tracking-normal">{settings.globalTopText}</div>}
             </div>
-            <div className="flex-1 flex flex-col justify-center gap-0.5 w-full min-h-0">
-              {['Forrett', 'Hovedrett', 'Dessert'].map((t) => {
-                const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
-                const allergenKey = `${key}Allergens`;
-                const text = data[key] || settings[key] || '...';
-                const rawAllergens = data[key] ? data[allergenKey] : (data[allergenKey] || settings[allergenKey]);
-                const cleanAllergens = (typeof rawAllergens === 'string') ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
-                return (
-                  <div key={key}>
-                    <p className={`text-[0.25rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
-                    <p className={`text-sm ${currentFont} leading-tight truncate px-1`}>{text}</p>
-                    {cleanAllergens && <p className={`text-[0.25rem] font-serif italic ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>Allergener: {cleanAllergens}</p>}
-                  </div>
-                )
-              })}
+            
+            <div className="flex-1 flex flex-col justify-center items-center gap-1 w-full min-h-0">
+              {menuType === '3-course' ? (
+                <div className="space-y-1 w-full">
+                  {['Forrett', 'Hovedrett', 'Dessert'].map((t, idx) => {
+                    const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
+                    const allergenKey = `${key}Allergens`;
+                    const text = activeData[key] || '...';
+                    const price = getPrice(key);
+                    const rawAllergens = activeData[allergenKey];
+                    const cleanAllergens = (typeof rawAllergens === 'string') ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
+                    return (
+                      <div key={key} className="flex flex-col items-center">
+                        {idx > 0 && <div className="w-8 h-[1px] bg-current opacity-10 my-0.5"></div>}
+                        <div className="relative flex items-center justify-center">
+                          <p className={`text-[0.25rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
+                          {price && <span className="absolute left-full whitespace-nowrap text-[0.35rem] font-black pl-1">| {price},-</span>}
+                        </div>
+                        <p className={`text-xs ${currentFont} leading-tight truncate max-w-[180px] px-1`}>{text}</p>
+                        {cleanAllergens && <p className={`text-[0.2rem] font-serif italic m-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>Allergener: {cleanAllergens}</p>}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1 w-full scale-90">
+                   {activeData.buffetName && <h2 className={`text-xs uppercase tracking-widest font-serif m-0 ${isDark ? 'text-white' : 'text-stone-900'}`}>{activeData.buffetName}</h2>}
+                   {activeData.buffetIntro && <p className={`text-[0.3rem] font-serif italic m-0 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{activeData.buffetIntro}</p>}
+                   <div className="w-full flex flex-col gap-1 mt-1">
+                      {activeData.buffetColdText && (<div><h4 className={`text-[0.3rem] font-serif m-0 ${isDark ? 'text-stone-200' : 'text-stone-800'}`}>{activeData.buffetColdTitle || 'Kalde retter'}</h4><p className={`text-[0.25rem] font-sans m-0 ${isDark ? 'text-stone-400' : 'text-stone-700'}`}>{activeData.buffetColdText}</p></div>)}
+                      {activeData.buffetWarmText && (<div><h4 className={`text-[0.3rem] font-serif m-0 ${isDark ? 'text-stone-200' : 'text-stone-800'}`}>{activeData.buffetWarmTitle || 'Varme retter'}</h4><p className={`text-[0.25rem] font-sans m-0 ${isDark ? 'text-stone-400' : 'text-stone-700'}`}>{activeData.buffetWarmText}</p></div>)}
+                   </div>
+                </div>
+              )}
             </div>
+
              <div className={`text-[0.4rem] ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
                {settings.globalBottomText && <p className="text-[0.25rem] font-sans mb-0">{settings.globalBottomText}</p>}
                <span className={currentFont}>Velbekomme</span>
@@ -262,6 +314,98 @@ const PreviewScreen = ({ data, settings }) => {
     </div>
   );
 };
+
+// --- FELLES SKJEMA FOR MENY ---
+const MenuInputForm = ({ data, onChange, settings }) => {
+  const menuType = data.menuType || '3-course';
+  const [editingField, setEditingField] = useState(null);
+
+  const TitleEditor = ({ fieldKey, defaultLabel }) => {
+    const value = data[fieldKey] || defaultLabel;
+    if (editingField === fieldKey) {
+      return (
+        <input autoFocus onBlur={() => setEditingField(null)} value={data[fieldKey] || ''} onChange={(e) => onChange(fieldKey, e.target.value)} className="w-full glass-input p-1 rounded text-xs font-bold text-stone-800" placeholder={defaultLabel} />
+      );
+    }
+    return (
+      <span className="text-xs uppercase font-bold text-stone-500 flex items-center gap-2">
+        {value} <Edit2 size={12} className="cursor-pointer hover:text-stone-900 transition-colors" onClick={() => setEditingField(fieldKey)} />
+      </span>
+    );
+  };
+
+  const PriceEditor = ({ fieldKey }) => {
+    const priceKey = `${fieldKey}Price`;
+    const value = data[priceKey] !== undefined && data[priceKey] !== '' ? data[priceKey] : (settings && settings[priceKey] ? settings[priceKey] : '');
+    const isOverride = data[priceKey] !== undefined && data[priceKey] !== '';
+
+    if (editingField === priceKey) {
+      return (
+        <input autoFocus onBlur={() => setEditingField(null)} value={data[priceKey] || ''} onChange={(e) => onChange(priceKey, e.target.value)} className="w-16 glass-input p-1 rounded text-xs font-bold text-stone-800" placeholder="Pris" />
+      );
+    }
+    return (
+      <span className={`text-[10px] normal-case font-normal flex items-center gap-1 cursor-pointer transition-colors ${isOverride ? 'text-blue-600 hover:text-blue-800 font-bold' : 'text-stone-400 hover:text-stone-700'}`} onClick={() => setEditingField(priceKey)}>
+        {value ? `(${value},-)` : '(Mangler standardpris)'} <Edit2 size={10} />
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2 bg-stone-200/50 p-1 rounded-xl w-full max-w-xs mb-4">
+        <button onClick={() => onChange('menuType', '3-course')} className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${menuType === '3-course' ? 'bg-white shadow text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}>3-Retters</button>
+        <button onClick={() => onChange('menuType', 'buffet')} className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${menuType === 'buffet' ? 'bg-white shadow text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}>Buffet</button>
+      </div>
+
+      {menuType === '3-course' ? (
+        <div className="space-y-4">
+          {['starter', 'main', 'dessert'].map((key) => {
+            const allergenKey = `${key}Allergens`;
+            return (
+              <div key={key} className="space-y-2">
+                  <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs uppercase font-bold text-stone-500">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
+                        <PriceEditor fieldKey={key} />
+                      </div>
+                      {!data[key] && settings && settings[key] && <span className="text-[10px] text-stone-400 italic bg-stone-100 px-2 rounded border border-stone-200">Bruker standard</span>}
+                  </div>
+                  <input value={data[key] || ''} onChange={(e) => onChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-lg font-serif text-stone-900" placeholder={settings && settings[key] ? `(Standard: ${settings[key]})` : "Skriv retten her..."} />
+                  <input value={data[allergenKey] || ''} onChange={(e) => onChange(allergenKey, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Allergener (f.eks. Gluten, Melk)" />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-4 border-l-4 border-stone-300 pl-4">
+           <div className="space-y-2">
+              <label className="text-xs uppercase font-bold text-stone-500 block">Buffet Navn (f.eks. HELGESTARTBUFFET)</label>
+              <input value={data.buffetName || ''} onChange={(e) => onChange('buffetName', e.target.value)} className="w-full glass-input p-3 rounded-xl font-serif font-bold text-stone-900" placeholder="Navn på buffeten..." />
+           </div>
+           <div className="space-y-2">
+              <label className="text-xs uppercase font-bold text-stone-500 block">Kort introtekst</label>
+              <textarea value={data.buffetIntro || ''} onChange={(e) => onChange('buffetIntro', e.target.value)} className="w-full glass-input p-3 rounded-xl text-sm italic text-stone-700" rows="2" placeholder="Hver fredag gjennom hele sommeren..."></textarea>
+           </div>
+           <div className="space-y-2 pt-2">
+              <TitleEditor fieldKey="buffetColdTitle" defaultLabel="Kalde retter" />
+              <input value={data.buffetColdText || ''} onChange={(e) => onChange('buffetColdText', e.target.value)} className="w-full glass-input p-3 rounded-xl text-stone-800" placeholder="Beskriv kalde retter..." />
+           </div>
+           <div className="space-y-2 pt-2">
+              <TitleEditor fieldKey="buffetWarmTitle" defaultLabel="Varme retter" />
+              <input value={data.buffetWarmText || ''} onChange={(e) => onChange('buffetWarmText', e.target.value)} className="w-full glass-input p-3 rounded-xl text-stone-800" placeholder="Beskriv varme retter..." />
+              <input value={data.buffetPS || ''} onChange={(e) => onChange('buffetPS', e.target.value)} className="w-full glass-input p-2 rounded-lg text-xs italic text-stone-600 mt-1" placeholder="Valgfri PS-tekst i bunn av varme retter..." />
+           </div>
+           <div className="space-y-2 pt-2">
+              <TitleEditor fieldKey="buffetDessertTitle" defaultLabel="Dessert" />
+              <input value={data.buffetDessertText || ''} onChange={(e) => onChange('buffetDessertText', e.target.value)} className="w-full glass-input p-3 rounded-xl text-stone-800" placeholder="Beskriv desserter..." />
+           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 // --- DASHBOARD ---
 function Dashboard() {
@@ -294,21 +438,21 @@ function Admin() {
   const [fullMenu, setFullMenu] = useState({});
   const [settings, setSettings] = useState({ 
     starter: '', starterAllergens: '', main: '', mainAllergens: '', dessert: '', dessertAllergens: '',
+    starterPrice: '', mainPrice: '', dessertPrice: '',
     theme: 'light', backgroundImage: BACKGROUND_IMAGES[0], fontFamily: 'font-great-vibes', fontSize: 'lvl3', opacityLevel: 2,
     globalTopText: '', globalBottomText: '', recurringMenus: []
   });
   const [activeTab, setActiveTab] = useState('daily');
+  const [editingRuleId, setEditingRuleId] = useState(null);
   const navigate = useNavigate();
 
-  // Lokalt state for opprettelse av ny fast meny (ukedagsregel)
-  const [newRule, setNewRule] = useState({
-    startDate: getTodayStr(),
-    endDate: getTodayStr(),
-    weekdays: [],
-    starter: '', starterAllergens: '',
-    main: '', mainAllergens: '',
-    dessert: '', dessertAllergens: ''
-  });
+  const emptyRule = {
+    startDate: getTodayStr(), endDate: getTodayStr(), weekdays: [], menuType: '3-course',
+    starter: '', starterAllergens: '', main: '', mainAllergens: '', dessert: '', dessertAllergens: '',
+    starterPrice: '', mainPrice: '', dessertPrice: '',
+    buffetName: '', buffetIntro: '', buffetColdTitle: '', buffetColdText: '', buffetWarmTitle: '', buffetWarmText: '', buffetPS: '', buffetDessertTitle: '', buffetDessertText: ''
+  };
+  const [newRule, setNewRule] = useState(emptyRule);
 
   useEffect(() => {
     const unsub1 = onSnapshot(doc(db, "restaurants", "dailyMenu"), (d) => d.exists() && setFullMenu(d.data()));
@@ -331,25 +475,42 @@ function Admin() {
 
   const handleAddRecurringRule = () => {
     if (newRule.weekdays.length === 0) { alert('Velg minst én ukedag'); return; }
-    const ruleWithId = { ...newRule, id: Date.now().toString() };
-    const updatedRules = [...(settings.recurringMenus || []), ruleWithId];
+    let updatedRules;
+    if (editingRuleId) {
+      updatedRules = (settings.recurringMenus || []).map(r => r.id === editingRuleId ? { ...newRule, id: editingRuleId } : r);
+    } else {
+      const ruleWithId = { ...newRule, id: Date.now().toString() };
+      updatedRules = [...(settings.recurringMenus || []), ruleWithId];
+    }
     handleSettingsChange('recurringMenus', updatedRules);
-    // Nullstill skjema felt
-    setNewRule({ startDate: getTodayStr(), endDate: getTodayStr(), weekdays: [], starter: '', starterAllergens: '', main: '', mainAllergens: '', dessert: '', dessertAllergens: '' });
+    setNewRule(emptyRule);
+    setEditingRuleId(null);
+  };
+
+  const handleEditRule = (rule) => {
+    setNewRule(rule);
+    setEditingRuleId(rule.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEdit = () => {
+    setNewRule(emptyRule);
+    setEditingRuleId(null);
   };
 
   const handleDeleteRecurringRule = (id) => {
     const updatedRules = (settings.recurringMenus || []).filter(r => r.id !== id);
     handleSettingsChange('recurringMenus', updatedRules);
+    if (editingRuleId === id) {
+      setNewRule(emptyRule);
+      setEditingRuleId(null);
+    }
   };
 
   const toggleWeekdayInRule = (dayId) => {
     const currentDays = [...newRule.weekdays];
-    if (currentDays.includes(dayId)) {
-      setNewRule({ ...newRule, weekdays: currentDays.filter(d => d !== dayId) });
-    } else {
-      setNewRule({ ...newRule, weekdays: [...currentDays, dayId] });
-    }
+    if (currentDays.includes(dayId)) setNewRule({ ...newRule, weekdays: currentDays.filter(d => d !== dayId) });
+    else setNewRule({ ...newRule, weekdays: [...currentDays, dayId] });
   };
   
   const currentDayData = fullMenu[selectedDate.id] || {};
@@ -388,15 +549,29 @@ function Admin() {
               <div className="border-t border-stone-200"></div>
               
               <div>
-                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Globale Tekstfelt (Viser inntil endret manuelt)</h2>
+                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Globale Tekstfelt & Standardpriser</h2>
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Topptekst / Pris (Plassert under "Dagens Meny")</label>
-                    <input value={settings.globalTopText || ''} onChange={(e) => handleSettingsChange('globalTopText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: 3-retters meny kr 695,-" />
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Topptekst / Menypris</label>
+                    <input value={settings.globalTopText || ''} onChange={(e) => handleSettingsChange('globalTopText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: 3-retters meny kr 850,-" />
                   </div>
-                  <div>
-                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Bunntekst (Plassert rett over "Velbekomme")</label>
-                    <input value={settings.globalBottomText || ''} onChange={(e) => handleSettingsChange('globalBottomText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: Drikke bestilles i baren" />
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="text-[10px] uppercase font-bold text-stone-500 block mb-1">Standardpris Forrett</label>
+                      <input value={settings.starterPrice || ''} onChange={(e) => handleSettingsChange('starterPrice', e.target.value)} className="w-full glass-input p-2 rounded-lg text-stone-800 text-sm" placeholder="F.eks: 230" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] uppercase font-bold text-stone-500 block mb-1">Standardpris Hovedrett</label>
+                      <input value={settings.mainPrice || ''} onChange={(e) => handleSettingsChange('mainPrice', e.target.value)} className="w-full glass-input p-2 rounded-lg text-stone-800 text-sm" placeholder="F.eks: 445" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] uppercase font-bold text-stone-500 block mb-1">Standardpris Dessert</label>
+                      <input value={settings.dessertPrice || ''} onChange={(e) => handleSettingsChange('dessertPrice', e.target.value)} className="w-full glass-input p-2 rounded-lg text-stone-800 text-sm" placeholder="F.eks: 210" />
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <label className="text-xs uppercase font-bold text-stone-500 block mb-2">Global Bunntekst</label>
+                    <input value={settings.globalBottomText || ''} onChange={(e) => handleSettingsChange('globalBottomText', e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="F.eks: Ønsker du kun deler av menyen..." />
                   </div>
                 </div>
               </div>
@@ -426,24 +601,11 @@ function Admin() {
                   ))}
                 </div>
               </div>
-              <div className="border-t border-stone-200"></div>
-              <div>
-                <h2 className="text-lg font-bold text-stone-700 mb-4 flex items-center gap-2"><FileText size={18} /> Standardtekster & Allergener (Fallback)</h2>
-                <div className="space-y-4">
-                  {['starter', 'main', 'dessert'].map((key) => (
-                    <div key={key} className="space-y-2">
-                        <label className="text-xs uppercase font-bold text-stone-500 block">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
-                        <input value={settings[key] || ''} onChange={(e) => handleSettingsChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-stone-800" placeholder="Retten..." />
-                        <input value={settings[`${key}Allergens`] || ''} onChange={(e) => handleSettingsChange(`${key}Allergens`, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder="Bare skriv allergenene (f.eks. Gluten, Melk)" />
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           ) : activeTab === 'recurring' ? (
             <div className="glass-panel p-8 rounded-3xl animate-fade-in space-y-8">
               <div>
-                <h2 className="text-xl font-serif text-stone-800 mb-4 flex items-center gap-2"><Repeat size={20} /> Opprett Fast Meny</h2>
+                <h2 className="text-xl font-serif text-stone-800 mb-4 flex items-center gap-2"><Repeat size={20} /> {editingRuleId ? 'Rediger Fast Meny' : 'Opprett Fast Meny'}</h2>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="text-xs uppercase font-bold text-stone-500 block mb-1">Fra dato</label>
@@ -466,22 +628,22 @@ function Admin() {
                   </div>
                 </div>
 
-                <div className="space-y-4 border-t border-stone-200/50 pt-4">
-                  {['starter', 'main', 'dessert'].map((key) => (
-                    <div key={key} className="space-y-1">
-                      <label className="text-xs uppercase font-bold text-stone-500 block">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
-                      <input value={newRule[key]} onChange={(e) => setNewRule({ ...newRule, [key]: e.target.value })} className="w-full glass-input p-3 rounded-xl text-stone-800 text-sm" placeholder="Rettens navn..." />
-                      <input value={newRule[`${key}Allergens`]} onChange={(e) => setNewRule({ ...newRule, [`${key}Allergens`]: e.target.value })} className="w-full glass-input p-2 rounded-lg text-xs text-stone-600 italic" placeholder="Allergener..." />
-                    </div>
-                  ))}
+                <div className="border-t border-stone-200/50 pt-4">
+                  <MenuInputForm data={newRule} onChange={(field, val) => setNewRule({ ...newRule, [field]: val })} settings={settings} />
                 </div>
 
-                <button onClick={handleAddRecurringRule} className="w-full bg-stone-900 text-white p-3 rounded-xl font-bold hover:bg-stone-800 transition-all shadow mt-6">
-                  Lagre Fast Meny-regel
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 mt-6">
+                  <button onClick={handleAddRecurringRule} className="flex-1 bg-stone-900 text-white p-3 rounded-xl font-bold hover:bg-stone-800 transition-all shadow">
+                    {editingRuleId ? 'Oppdater Fast Meny-regel' : 'Lagre Fast Meny-regel'}
+                  </button>
+                  {editingRuleId && (
+                    <button onClick={cancelEdit} className="bg-white text-stone-700 p-3 rounded-xl font-bold border border-stone-300 hover:bg-stone-100 transition-all shadow-sm flex items-center justify-center gap-2">
+                      <X size={18} /> Avbryt
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* LISTE OVER AKTIVE REGLER */}
               <div className="border-t border-stone-200 pt-6">
                 <h3 className="text-lg font-serif text-stone-800 mb-4">Aktive faste menyer</h3>
                 <div className="space-y-3">
@@ -490,16 +652,32 @@ function Admin() {
                   ) : (
                     (settings.recurringMenus || []).map((rule) => {
                       const daysText = rule.weekdays.map(id => WEEKDAYS.find(w => w.id === id)?.label).join(', ');
+                      const isBuffet = rule.menuType === 'buffet';
+                      const isBeingEdited = editingRuleId === rule.id;
+                      
                       return (
-                        <div key={rule.id} className="bg-white/60 border border-stone-200 rounded-xl p-4 flex justify-between items-start gap-4 shadow-sm animate-fade-in">
-                          <div className="text-xs space-y-1 text-stone-700">
-                            <p className="font-bold text-stone-900">Ukedager: [{daysText}]</p>
+                        <div key={rule.id} className={`bg-white/60 border ${isBeingEdited ? 'border-blue-400 shadow-md ring-2 ring-blue-100' : 'border-stone-200 shadow-sm'} rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all`}>
+                          <div className="text-xs space-y-1 text-stone-700 w-full overflow-hidden">
+                            <div className="flex justify-between w-full">
+                               <p className="font-bold text-stone-900">Ukedager: [{daysText}]</p>
+                               <span className="bg-stone-200 px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0">{isBuffet ? 'Buffet' : '3-Retters'}</span>
+                            </div>
                             <p className="text-stone-500 font-mono">Periode: {rule.startDate} til {rule.endDate}</p>
-                            <p className="mt-1 truncate max-w-md"><span className="font-semibold">F:</span> {rule.starter || '—'} | <span className="font-semibold">H:</span> {rule.main || '—'} | <span className="font-semibold">D:</span> {rule.dessert || '—'}</p>
+                            {isBuffet ? (
+                               <p className="mt-1 truncate italic">{rule.buffetName || 'Uten navn'}</p>
+                            ) : (
+                               <p className="mt-1 truncate"><span className="font-semibold">F:</span> {rule.starter || '—'} | <span className="font-semibold">H:</span> {rule.main || '—'} | <span className="font-semibold">D:</span> {rule.dessert || '—'}</p>
+                            )}
                           </div>
-                          <button onClick={() => handleDeleteRecurringRule(rule.id)} className="text-red-500 hover:text-red-700 p-1 bg-white rounded-lg border border-stone-200 transition-all">
-                            <Trash2 size={14} />
-                          </button>
+                          
+                          <div className="flex shrink-0 gap-2 w-full sm:w-auto justify-end">
+                            <button onClick={() => handleEditRule(rule)} className="text-blue-500 hover:text-blue-700 p-2 bg-white rounded-lg border border-stone-200 hover:border-blue-300 transition-all">
+                              <Edit2 size={16} />
+                            </button>
+                            <button onClick={() => handleDeleteRecurringRule(rule.id)} className="text-red-500 hover:text-red-700 p-2 bg-white rounded-lg border border-stone-200 hover:border-red-300 transition-all">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
                       )
                     })
@@ -513,21 +691,7 @@ function Admin() {
                 {dates.map((date) => (<button key={date.id} onClick={() => setSelectedDate(date)} className={`flex-shrink-0 px-5 py-3 rounded-xl transition-all border ${selectedDate.id === date.id ? 'bg-stone-800 text-white scale-105 shadow-md' : 'bg-white/40 text-stone-600 border-white hover:bg-white'}`}><div className="text-xs uppercase opacity-70">{date.display.split(' ')[0]}</div><div className="font-bold text-lg">{date.display.split(' ')[1]}</div></button>))}
               </div>
               <h2 className="text-xl font-serif text-stone-800 mb-6 capitalize">{selectedDate.fullDisplay}</h2>
-              <div className="space-y-6">
-                {['starter', 'main', 'dessert'].map((key) => {
-                  const allergenKey = `${key}Allergens`;
-                  return (
-                    <div key={key} className="space-y-2">
-                        <div className="flex justify-between">
-                            <label className="text-xs uppercase font-bold text-stone-500">{key === 'starter' ? 'Forrett' : key === 'main' ? 'Hovedrett' : 'Dessert'}</label>
-                            {!currentDayData[key] && settings[key] && <span className="text-[10px] text-stone-400 italic bg-stone-100 px-2 rounded border border-stone-200">Bruker standard</span>}
-                        </div>
-                        <input value={currentDayData[key] || ''} onChange={(e) => handleMenuChange(key, e.target.value)} className="w-full glass-input p-4 rounded-xl text-lg font-serif text-stone-900" placeholder={settings[key] ? `(Standard: ${settings[key]})` : "Skriv retten her..."} />
-                        <input value={currentDayData[allergenKey] || ''} onChange={(e) => handleMenuChange(allergenKey, e.target.value)} className="w-full glass-input p-3 rounded-lg text-sm text-stone-600 italic" placeholder={settings[allergenKey] ? `(Std. Allergener: ${settings[allergenKey]})` : "Bare skriv allergenene (f.eks. Gluten, Melk)"} />
-                    </div>
-                  );
-                })}
-              </div>
+              <MenuInputForm data={currentDayData} onChange={handleMenuChange} settings={settings} />
             </div>
           )}
         </div>
