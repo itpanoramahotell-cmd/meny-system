@@ -46,14 +46,22 @@ const WEEKDAYS = [
   { id: 4, label: 'Tor' }, { id: 5, label: 'Fre' }, { id: 6, label: 'Lør' }, { id: 0, label: 'Søn' }
 ];
 
-const getTodayStr = () => new Date().toISOString().split('T')[0];
+// Låser dato til Norsk lokal tid, ikke UTC
+const getLocalYYYYMMDD = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayStr = () => getLocalYYYYMMDD(new Date());
 
 const getNext14Days = () => {
   const dates = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    dates.push({ id: d.toISOString().split('T')[0], display: d.toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' }), fullDisplay: d.toLocaleDateString('no-NO', { weekday: 'long', day: 'numeric', month: 'long' }) });
+    dates.push({ id: getLocalYYYYMMDD(d), display: d.toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' }), fullDisplay: d.toLocaleDateString('no-NO', { weekday: 'long', day: 'numeric', month: 'long' }) });
   }
   return dates;
 };
@@ -73,6 +81,16 @@ const calculateFontSize = (text, baseSizeId) => {
   if (len < 25) return selectedSet.medium;
   if (len < 45) return selectedSet.long;
   return selectedSet.xtra;
+};
+
+// --- DATA MERGE FUNKSJON ---
+// Fletter sammen data lag-for-lag: Innstillinger -> Fast meny -> Daglig meny.
+// Hvis kokken har skrevet noe på daglig meny, vinner den for akkurat det feltet.
+const mergeMenuData = (settingsData, ruleData, dailyData) => {
+  const merged = { ...settingsData };
+  if (ruleData) Object.keys(ruleData).forEach(key => { if (ruleData[key]) merged[key] = ruleData[key]; });
+  if (dailyData) Object.keys(dailyData).forEach(key => { if (dailyData[key]) merged[key] = dailyData[key]; });
+  return merged;
 };
 
 // --- DISPLAY (TV-SKJERMEN) ---
@@ -136,10 +154,10 @@ function Display() {
   const currentDayOfWeek = new Date().getDay();
   const matchingRule = recurringRules.find(rule => today >= rule.startDate && today <= rule.endDate && rule.weekdays.includes(currentDayOfWeek));
 
-  const activeData = (dayData && Object.keys(dayData).length > 0) ? dayData : (matchingRule ? matchingRule : settings);
+  const activeData = mergeMenuData(settings, matchingRule, dayData);
   const menuType = activeData.menuType || '3-course';
 
-  const getPrice = (key) => activeData[`${key}Price`] !== undefined && activeData[`${key}Price`] !== '' ? activeData[`${key}Price`] : settings[`${key}Price`];
+  const getPrice = (key) => activeData[`${key}Price`];
 
   return (
     <div className="fixed inset-0 w-full h-full flex flex-col items-center justify-center overflow-hidden bg-black">
@@ -147,29 +165,20 @@ function Display() {
       {incomingBg && (<div className={`absolute inset-0 bg-cover bg-center z-10 transition-opacity duration-[2000ms] ease-in-out ${shouldFadeIn ? 'opacity-100' : 'opacity-0'}`} style={{ backgroundImage: `url('/${incomingBg}')` }}></div>)}
       {(currentBg || incomingBg) && (<div className={`absolute inset-0 z-20 transition-all duration-1000 ${isDark ? 'bg-black/50' : 'bg-black/20'}`}></div>)}
 
-      {/* RAMMEN: w- og h- skalerer dynamisk, fyller 94% av skjermarealet uansett rotasjon */}
       <div className={`relative z-30 w-[94vw] h-[94vh] rounded-[2.5rem] text-center animate-fade-in transition-all duration-500 backdrop-blur-xl border shadow-2xl flex flex-col justify-between py-8 px-6 ${isDark ? 'border-white/10 text-white' : 'border-white/50 text-stone-900'}`} style={{ backgroundColor: bgStyle }}>
         
-        {/* TOPP */}
         <div className="flex-none">
              <span className={`text-xl md:text-2xl uppercase tracking-[0.4em] font-sans font-bold ${isDark ? 'text-stone-300' : 'text-stone-800'}`}>Dagens Meny</span>
              {settings.globalTopText && <p className={`text-lg md:text-xl font-sans font-semibold tracking-wide mt-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>{settings.globalTopText}</p>}
         </div>
 
-        {/* MIDTEN: Sentrert innholdsblokk med kontrollerte, faste mellomrom for å unngå strekking */}
         <div className="flex-1 flex flex-col justify-center items-center my-4 overflow-hidden w-full min-h-0">
           {isMenuLoaded && menuType === '3-course' && (
             <div className="w-full max-w-4xl space-y-4 md:space-y-6 flex flex-col items-center">
               <MenuSection title="Forrett" price={getPrice('starter')} dish={activeData.starter} allergens={activeData.starterAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              
-              {/* SUBTIL SKILLELINJE */}
               <div className={`w-24 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-current to-transparent`}></div>
-              
               <MenuSection title="Hovedrett" price={getPrice('main')} dish={activeData.main} allergens={activeData.mainAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
-              
-              {/* SUBTIL SKILLELINJE */}
               <div className={`w-24 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-current to-transparent`}></div>
-              
               <MenuSection title="Dessert" price={getPrice('dessert')} dish={activeData.dessert} allergens={activeData.dessertAllergens} isDark={isDark} font={currentFont} baseSize={settings.fontSize} />
             </div>
           )}
@@ -208,7 +217,6 @@ function Display() {
           )}
         </div>
 
-        {/* BUNN */}
         <div className="flex-none">
             {settings.globalBottomText && <p className={`text-md md:text-lg font-sans tracking-wide mb-1 font-medium ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{settings.globalBottomText}</p>}
             <p className={`text-3xl md:text-4xl ${currentFont} ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Velbekomme</p>
@@ -225,7 +233,6 @@ const MenuSection = ({ title, price, dish, allergens, isDark, font, baseSize }) 
 
   return (
     <div className="flex flex-col items-center justify-center w-full">
-      {/* OVERSKRIFTMED ABSOLUTT HØYREJUSTERT PRIS FOR PERFEKT SENTRERING */}
       <div className="relative flex items-center justify-center">
         <h2 className={`text-xs md:text-sm uppercase tracking-[0.25em] font-sans font-semibold mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
           {title}
@@ -247,17 +254,17 @@ const MenuSection = ({ title, price, dish, allergens, isDark, font, baseSize }) 
 };
 
 // --- PREVIEW ---
-const PreviewScreen = ({ data, settings }) => {
+const PreviewScreen = ({ data, matchingRule, settings }) => {
   const isDark = settings.theme === 'dark';
   const currentBg = settings.backgroundImage || BACKGROUND_IMAGES[0];
   const currentFont = settings.fontFamily || 'font-great-vibes';
   const opacityObj = OPACITY_LEVELS[settings.opacityLevel] || OPACITY_LEVELS[2];
   const bgStyle = isDark ? opacityObj.hexDark : opacityObj.hexLight;
   
-  const activeData = (data && Object.keys(data).length > 0) ? data : settings;
+  const activeData = mergeMenuData(settings, matchingRule, data);
   const menuType = activeData.menuType || '3-course';
 
-  const getPrice = (key) => activeData[`${key}Price`] !== undefined && activeData[`${key}Price`] !== '' ? activeData[`${key}Price`] : settings[`${key}Price`];
+  const getPrice = (key) => activeData[`${key}Price`];
 
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden shadow-inner border border-stone-300">
@@ -272,7 +279,7 @@ const PreviewScreen = ({ data, settings }) => {
             
             <div className="flex-1 flex flex-col justify-center items-center gap-1 w-full min-h-0">
               {menuType === '3-course' ? (
-                <div className="space-y-1 w-full">
+                <div className="space-y-1 w-full flex flex-col items-center">
                   {['Forrett', 'Hovedrett', 'Dessert'].map((t, idx) => {
                     const key = t === 'Forrett' ? 'starter' : t === 'Hovedrett' ? 'main' : 'dessert';
                     const allergenKey = `${key}Allergens`;
@@ -281,7 +288,7 @@ const PreviewScreen = ({ data, settings }) => {
                     const rawAllergens = activeData[allergenKey];
                     const cleanAllergens = (typeof rawAllergens === 'string') ? rawAllergens.replace(/^Allergener:\s*/i, '') : null;
                     return (
-                      <div key={key} className="flex flex-col items-center">
+                      <div key={key} className="flex flex-col items-center w-full">
                         {idx > 0 && <div className="w-8 h-[1px] bg-current opacity-10 my-0.5"></div>}
                         <div className="relative flex items-center justify-center">
                           <p className={`text-[0.25rem] font-bold uppercase tracking-widest mb-0 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>{t}</p>
@@ -515,6 +522,15 @@ function Admin() {
   
   const currentDayData = fullMenu[selectedDate.id] || {};
 
+  // Finn aktiv fast meny for den valgte datoen (for å sende til PreviewScreen)
+  const selectedDateObj = new Date(selectedDate.id);
+  const selectedDayOfWeek = selectedDateObj.getDay();
+  const matchingRuleForSelected = (settings.recurringMenus || []).find(rule => 
+    selectedDate.id >= rule.startDate && 
+    selectedDate.id <= rule.endDate && 
+    rule.weekdays.includes(selectedDayOfWeek)
+  );
+
   return (
     <div className="min-h-screen p-6 md:p-12 admin-background">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -699,7 +715,10 @@ function Admin() {
         <div className="lg:col-span-5 space-y-6">
            <div className="sticky top-6">
               <div className="flex items-center gap-2 mb-4 ml-2"><Monitor size={16} className="text-stone-500"/><span className="text-xs font-bold uppercase text-stone-500">Live Preview</span></div>
-              <div className="relative group rounded-xl overflow-hidden shadow-xl border-4 border-stone-800 bg-stone-200"><PreviewScreen data={currentDayData} settings={settings} /></div>
+              <div className="relative group rounded-xl overflow-hidden shadow-xl border-4 border-stone-800 bg-stone-200">
+                 {/* Sender nå inn matchingRuleForSelected slik at preview fungerer riktig */}
+                 <PreviewScreen data={currentDayData} matchingRule={matchingRuleForSelected} settings={settings} />
+              </div>
            </div>
         </div>
       </div>
